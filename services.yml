@@ -1,0 +1,15 @@
+version: '3.5'
+services:
+  base:
+    privileged: true
+    volumes:
+    - type: bind
+      source: /sys/fs/cgroup
+      target: /sys/fs/cgroup
+      read_only: true
+    networks:
+    - cluster_net
+    
+networks:
+  cluster_net:
+    name: "${DOMAIN}"
