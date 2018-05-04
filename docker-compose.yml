@@ -1,42 +1,9 @@
 version: '3.5'
 services:
   server:
-    image: "ambari/server:${CLUSTER_TAG}"
-    container_name: "server.${NODE_PREFIX}"
-    hostname: "server.${NODE_PREFIX}.${DOMAIN}"
-    privileged: true
-    networks:
-    - cluster_net
-    volumes:
-    - type: bind
-      source: /sys/fs/cgroup
-      target: /sys/fs/cgroup
-      read_only: true
+    image: "centos/systemd"
   node1:
-    image: "ambari/agent:${CLUSTER_TAG}"
-    container_name: "node1.${NODE_PREFIX}"
-    hostname: "node1.${NODE_PREFIX}.${DOMAIN}"
-    privileged: true
-    networks:
-    - cluster_net
-    volumes:
-    - type: bind
-      source: /sys/fs/cgroup
-      target: /sys/fs/cgroup
-      read_only: true
-  node2:
-    image: "ambari/agent:${CLUSTER_TAG}"
-    container_name: "node2.${NODE_PREFIX}"
-    hostname: "node2.${NODE_PREFIX}.${DOMAIN}"
-    privileged: true
-    networks:
-    - cluster_net
-    volumes:
-    - type: bind
-      source: /sys/fs/cgroup
-      target: /sys/fs/cgroup
-      read_only: true
-
+    image: "centos/systemd"
 networks:
   cluster_net:
     name: "${DOMAIN}"

@@ -1,0 +1,14 @@
+{%- macro systemd(name, image, suffix, domain) %}
+  {{- name }}:
+    image: "{{ image }}"
+    container_name: "{{ name }}.{{ suffix }}"
+    hostname: "{{ name }}.{{ suffix }}.{{ domain }}"
+    privileged: true
+    networks:
+    - cluster_net
+    volumes:
+    - type: bind
+      source: /sys/fs/cgroup
+      target: /sys/fs/cgroup
+      read_only: true
+{%- endmacro %}
