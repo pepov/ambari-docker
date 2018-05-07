@@ -1,7 +1,8 @@
 FROM {{ base_image }}
 MAINTAINER "Eugene Chekanskiy" <echekanskiy@hortonworks.com>
-{%- for label in labels %}
-LABEL {{ label }}
+{%- for label_key, label_value in labels.items() %}
+LABEL {{ label_key }}="{{ label_value }}"
+ENV {{ upper(label_key.replace(".","_")) }}="{{ label_value }}"
 {%- endfor %}
 COPY systemctl /usr/bin
 RUN chmod 755 /usr/bin/systemctl && chown root:root /usr/bin/systemctl

@@ -1,7 +1,7 @@
-import tempfile
 import os
-import uuid
 import shutil
+import tempfile
+import uuid
 
 
 def copytree(src, dst, symlinks=False, ignore=None):

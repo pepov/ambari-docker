@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+function wait_pid(){
+    for pid in "$@"; do
+        while kill -0 "$pid" > /dev/null 2>&1; do
+            sleep 1
+        done
+    done
+}
+
+function wait_url() {
+    ticks=0
+    while [ true ]; do
+        curl -sSf $1 > /dev/null
+        curl -sSf $1 > /dev/null
+        if [ $? -eq 0 ]
+        then
+            return 0
+        else
+            sleep 1
+            ticks=$((ticks + 1))
+            if [ $ticks -eq $2 ]
+            then
+                return 1
+            fi
+        fi
+    done
+}
+
+function stop_agent() {
+    if [ -n "$AMBARI_AGENT" ]; then
+        echo '[INFO] executing "ambari-agent stop"'
+
+        ambari-agent stop && \
+        echo "[INFO] Ambari agent stopped gracefully." && return 0
+    else
+        return 0
+    fi
+
+    return 1
+}
+
+function stop_server() {
+    echo '[INFO] executing "ambari-server stop"'
+
+    ambari-server stop && \
+    echo "[INFO] Ambari server stopped gracefully." && \
+    return 0
+
+    return 1
+}
+
+function run_ambari_server() {
+    echo '[INFO] executing "ambari-server start"'
+    ambari-server start
+    wait_url localhost:8080 60
+    return $?
+}
+
+function run_ambari_agent() {
+    if [ -n "$AMBARI_AGENT" ]; then
+        echo '[INFO] executing "ambari-agent start"'
+        ambari-agent start
+    fi
+    return 0
+}
+
+function wait_for_agent() {
+    if [ -n "$AMBARI_AGENT" ]; then
+      wait_pid $(cat /var/run/ambari-agent/ambari-agent.pid)
+      echo "[ERROR] Ambari agent stopped externally."
+      return 1
+    fi
+}
+
+function wait_for_server() {
+    wait_pid $(cat /var/run/ambari-server/ambari-server.pid)
+    echo "[ERROR] Ambari server stopped externally."
+    return 1
+}
+
+
+function error_exit() {
+    exit 1
+}
+
+function run_service() {
+    run_ambari_server && run_ambari_agent && \
+    wait_for_agent && wait_for_server
+    # this service must be stopped through trap
+    error_exit
+}
+
+function stop_service() {
+    stop_agent && stop_server
+    exit $?
+}
+
+trap "stop_service" SIGTERM
+run_service
+exit $?
+

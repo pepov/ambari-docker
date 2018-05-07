@@ -1,10 +1,12 @@
 import os
 import subprocess
+import sys
 import urllib.parse
 import uuid
+
 import docker
 import docker.errors
-import sys
+
 from ambari_docker.config import jinja_env, image_prefix
 from ambari_docker.utils import TempDirectory, copytree
 
@@ -13,24 +15,6 @@ docker_client = docker.from_env()
 _os_to_image = {
     'centos7': 'centos:7'
 }
-
-
-def _parse_base_image(base_image_name, repo_os):
-    if not base_image_name:
-        base_image_name = _os_to_image[repo_os]
-    try:
-        base_image = docker_client.images.get(base_image_name)
-    except docker.errors.ImageNotFound:
-        base_image = docker_client.images.pull(base_image_name)
-
-    if 'os' in base_image.labels:
-        if base_image.labels['os'] != repo_os:
-            raise Exception(f"Base image os('{base_image.labels['os']}') is not a repo os '{os}'")
-
-    base_stacks = base_image.labels['stacks'].split(",") if 'stacks' in base_image.labels else []
-    base_builds = base_image.labels['builds'].split(",") if 'builds' in base_image.labels else []
-
-    return base_image_name, base_stacks, base_builds
 
 
 def _get_base_image_info(base_image_name, repo_os):
@@ -53,43 +37,62 @@ def _get_base_image_info(base_image_name, repo_os):
     return base_image_name, labels
 
 
-def build_stack_image(stack_repo_url: str, base_image_name: str = None,
-                      image_name_template="{PREFIX}/{NAME}:{TAG}") -> str:
-    url = urllib.parse.urlparse(stack_repo_url)
-    path_parts = url.path.split('/')
-
-    repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
-    repo_file_url = f"{stack_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
-    repo_name = f"{repo_stack}-{repo_build}"
-    resulting_image_tag = image_name_template.format(PREFIX=image_prefix, NAME=repo_stack.lower(),
-                                                     TAG=str(uuid.uuid4()))
-
-    template = jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
-    template_directory = os.path.dirname(os.path.abspath(template.filename))
-    base_image_name, base_stacks, base_builds = _parse_base_image(base_image_name, repo_os)
-
-    stacks = ",".join(sorted(base_stacks + [repo_stack]))
-    builds = ",".join(sorted(base_builds + [repo_name]))
-
-    labels = [
-        f'repo_os="{repo_os}"',
-        f'stacks="{stacks}"',
-        f'builds="{builds}"'
-    ]
-
-    dockerfile_content = template.render(repo_file_url=repo_file_url, repo_name=repo_name, labels=labels,
-                                         base_image=base_image_name)
-
-    result = subprocess.run(
-        f'docker build -t {resulting_image_tag} -',
-        input=dockerfile_content.encode("UTF-8"),
-        shell=True
-    )
-
-    if result.returncode != 0:
-        raise Exception(f"Failed to build image {resulting_image_tag}")
-    return resulting_image_tag
-
+# def _parse_base_image(base_image_name, repo_os):
+#     if not base_image_name:
+#         base_image_name = _os_to_image[repo_os]
+#     try:
+#         base_image = docker_client.images.get(base_image_name)
+#     except docker.errors.ImageNotFound:
+#         base_image = docker_client.images.pull(base_image_name)
+#
+#     if 'os' in base_image.labels:
+#         if base_image.labels['os'] != repo_os:
+#             raise Exception(f"Base image os('{base_image.labels['os']}') is not a repo os '{os}'")
+#
+#     base_stacks = base_image.labels['stacks'].split(",") if 'stacks' in base_image.labels else []
+#     base_builds = base_image.labels['builds'].split(",") if 'builds' in base_image.labels else []
+#
+#     return base_image_name, base_stacks, base_builds
+#
+# def build_stack_image(stack_repo_url: str, base_image_name: str = None,
+#                       image_name_template="{PREFIX}/{NAME}:{TAG}") -> str:
+#     url = urllib.parse.urlparse(stack_repo_url)
+#     path_parts = url.path.split('/')
+#
+#     repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
+#     repo_file_url = f"{stack_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
+#     repo_name = f"{repo_stack}-{repo_build}"
+#     resulting_image_tag = image_name_template.format(PREFIX=image_prefix, NAME=repo_stack.lower(),
+#                                                      TAG=str(uuid.uuid4()))
+#
+#     template = jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
+#     template_directory = os.path.dirname(os.path.abspath(template.filename))
+#     base_image_name, base_stacks, base_builds = _parse_base_image(base_image_name, repo_os)
+#
+#     stacks = ",".join(sorted(base_stacks + [repo_stack]))
+#     builds = ",".join(sorted(base_builds + [repo_name]))
+#
+#     labels = [
+#         f'repo_os="{repo_os}"',
+#         f'stacks="{stacks}"',
+#         f'builds="{builds}"'
+#     ]
+#
+#     dockerfile_content = template.render(repo_file_url=repo_file_url, repo_name=repo_name, labels=labels,
+#                                          base_image=base_image_name)
+#
+#     result = subprocess.run(
+#         f'docker build -t {resulting_image_tag} -',
+#         input=dockerfile_content.encode("UTF-8"),
+#         shell=True
+#     )
+#
+#     if result.returncode != 0:
+#         raise Exception(f"Failed to build image {resulting_image_tag}")
+#     return resulting_image_tag
+#
+# def append_stack_image(stack_repo_url: str, base_stack_image: str, mix_name: str) -> str:
+#     return build_stack_image(stack_repo_url, base_stack_image, "{PREFIX}/" + mix_name + ":{TAG}")
 
 def _build_docker_image(image_tag, base_dir, docker_file_content):
     """
@@ -124,17 +127,25 @@ def _build_docker_image(image_tag, base_dir, docker_file_content):
         )
 
 
-def append_stack_image(stack_repo_url: str, base_stack_image: str, mix_name: str) -> str:
-    return build_stack_image(stack_repo_url, base_stack_image, "{PREFIX}/" + mix_name + ":{TAG}")
-
-
-def build_ambari_image(
+def _build_ambari_image(
         ambari_repo_url: str,
         base_image_name: str = None,
         component: str = "server",
         additional_labels=None,
         **kwargs
 ):
+    """
+    Builds image with ambari packages installed.
+    Dockerfile template will be picked up by *component* argument.
+
+    :param ambari_repo_url: ambari repository url
+    :param base_image_name: base image for resulting image
+    :param component: component name, can be 'server' or 'agent'
+    :param additional_labels: additional labels to be added to resulting image
+    :param kwargs: key-value arguments that will be passed to Dockerfile template
+
+    :return: resulting image tag
+    """
     if additional_labels is None:
         additional_labels = {}
 
@@ -184,7 +195,7 @@ def build_ambari_image(
 
 def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None, install_agent: bool = True):
     add_labels = {"ambari.agent": "true"} if install_agent else {}
-    return build_ambari_image(
+    return _build_ambari_image(
         ambari_repo_url,
         base_image_name,
         "server",
@@ -194,7 +205,4 @@ def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None,
 
 
 def build_ambari_agent_image(ambari_repo_url: str, base_image_name: str = None):
-    return build_ambari_image(ambari_repo_url, base_image_name, "agent")
-
-
-print(build_ambari_server_image("http://s3.amazonaws.com/dev.hortonworks.com/ambari/centos7/2.x/BUILDS/2.7.0.0-451"))
+    return _build_ambari_image(ambari_repo_url, base_image_name, "agent")
