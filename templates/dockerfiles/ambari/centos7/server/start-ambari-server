@@ -1,102 +1,84 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python
+from __future__ import print_function
 
-function wait_pid(){
-    for pid in "$@"; do
-        while kill -0 "$pid" > /dev/null 2>&1; do
-            sleep 1
-        done
-    done
-}
+import os
+import signal
+import subprocess
+import sys
+import time
 
-function wait_url() {
-    ticks=0
-    while [ true ]; do
-        curl -sSf $1 > /dev/null
-        curl -sSf $1 > /dev/null
-        if [ $? -eq 0 ]
-        then
-            return 0
-        else
-            sleep 1
-            ticks=$((ticks + 1))
-            if [ $ticks -eq $2 ]
-            then
-                return 1
-            fi
-        fi
-    done
-}
+import psutil
+import requests
 
-function stop_agent() {
-    if [ -n "$AMBARI_AGENT" ]; then
-        echo '[INFO] executing "ambari-agent stop"'
+AGENT_PID_FILE = "/var/run/ambari-agent/ambari-agent.pid"
+SERVER_PID_FILE = "/var/run/ambari-server/ambari-server.pid"
 
-        ambari-agent stop && \
-        echo "[INFO] Ambari agent stopped gracefully." && return 0
-    else
-        return 0
-    fi
-
-    return 1
-}
-
-function stop_server() {
-    echo '[INFO] executing "ambari-server stop"'
-
-    ambari-server stop && \
-    echo "[INFO] Ambari server stopped gracefully." && \
-    return 0
-
-    return 1
-}
-
-function run_ambari_server() {
-    echo '[INFO] executing "ambari-server start"'
-    ambari-server start
-    wait_url localhost:8080 60
-    return $?
-}
-
-function run_ambari_agent() {
-    if [ -n "$AMBARI_AGENT" ]; then
-        echo '[INFO] executing "ambari-agent start"'
-        ambari-agent start
-    fi
-    return 0
-}
-
-function wait_for_agent() {
-    if [ -n "$AMBARI_AGENT" ]; then
-      wait_pid $(cat /var/run/ambari-agent/ambari-agent.pid)
-      echo "[ERROR] Ambari agent stopped externally."
-      return 1
-    fi
-}
-
-function wait_for_server() {
-    wait_pid $(cat /var/run/ambari-server/ambari-server.pid)
-    echo "[ERROR] Ambari server stopped externally."
-    return 1
-}
+SERVER_INSTALLED = os.environ.get("AMBARI_SERVER_INSTALLED", "false") == "true"
+AGENT_INSTALLED = os.environ.get("AMBARI_AGENT_INSTALLED", "false") == "true"
 
 
-function error_exit() {
-    exit 1
-}
+def _pid_from_file(file_path):
+    return int(open(file_path, "r").read().strip())
 
-function run_service() {
-    run_ambari_server && run_ambari_agent && \
-    wait_for_agent && wait_for_server
-    # this service must be stopped through trap
-    error_exit
-}
 
-function stop_service() {
-    stop_agent && stop_server
-    exit $?
-}
+def info(message):
+    print("[INFO] {message}".format(message=message))
+    sys.stdout.flush()
 
-trap "stop_service" SIGTERM
-run_service
-exit $?
 
+def error(message):
+    print("[ERROR] {message}".format(message=message))
+    sys.stdout.flush()
+
+
+def run_cmd(*args, **kwargs):
+    try:
+        return subprocess.check_call(*args, **kwargs), 0
+    except subprocess.CalledProcessError as e:
+        return e.output, e.returncode
+
+
+def wait_for_url(url, retries=60):
+    while retries != 0:
+        try:
+            _ = requests.get(url)
+            return
+        except:
+            time.sleep(1)
+            retries -= 1
+    raise Exception("Url not available")
+
+
+def start_ambari_agent_process():
+    result, code = run_cmd("ambari-agent start", shell=True, stderr=subprocess.STDOUT)
+    process = psutil.Process(pid=_pid_from_file(AGENT_PID_FILE))
+    return process
+
+
+def start_ambari_server_process():
+    info("About to start ambari-server...")
+    result, code = run_cmd("ambari-server start", shell=True, stderr=subprocess.STDOUT)
+    wait_for_url("http://localhost:8080")
+    process = psutil.Process(pid=_pid_from_file(SERVER_PID_FILE))
+    info("Ambari server started")
+    return process
+
+
+def stop_ambari_server_process():
+    info("About to stop ambari-server...")
+    result, code = run_cmd("ambari-server stop", shell=True, stderr=subprocess.STDOUT)
+    info("Ambari server gracefully stopped")
+
+
+if __name__ == "__main__":
+    def sigterm_handler(signal, frame):
+        stop_ambari_server_process()
+        sys.exit(0)
+
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
+    server_process = start_ambari_server_process()
+    server_process.wait()
+    error("Server stopped externally")
+    sys.exit(1)

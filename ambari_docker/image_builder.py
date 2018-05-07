@@ -2,7 +2,6 @@ import os
 import subprocess
 import sys
 import urllib.parse
-import uuid
 
 import docker
 import docker.errors
@@ -132,6 +131,7 @@ def _build_ambari_image(
         base_image_name: str = None,
         component: str = "server",
         additional_labels=None,
+        env_variables=None,
         **kwargs
 ):
     """
@@ -148,6 +148,8 @@ def _build_ambari_image(
     """
     if additional_labels is None:
         additional_labels = {}
+    if env_variables is None:
+        env_variables = {}
 
     url = urllib.parse.urlparse(ambari_repo_url)
     path_parts = url.path.split('/')
@@ -178,14 +180,20 @@ def _build_ambari_image(
         else:
             labels[label_key] = label_value
 
+    if labels:
+        kwargs['label'] = " ".join([f'{k}="{v}"' for k, v in labels.items()])
+
+    if env_variables:
+        kwargs['environment'] = " ".join([f'{k}="{v}"' for k, v in env_variables.items()])
+
     template = jinja_env.get_template(f"dockerfiles/ambari/{repo_os}/{component}/Dockerfile")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
     dockerfile_content = template.render(
         repo_file_url=repo_file_url,
-        labels=[f'{key}="{value}"' for key, value in labels.items()],
         base_image=base_image_name,
         **kwargs
     )
+    print(dockerfile_content)
     resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
 
     _build_docker_image(resulting_image_tag, template_directory, dockerfile_content)
@@ -195,14 +203,28 @@ def _build_ambari_image(
 
 def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None, install_agent: bool = True):
     add_labels = {"ambari.agent": "true"} if install_agent else {}
+    env_variables = {
+        "AMBARI_SERVER_INSTALLED": "true",
+        "AMBARI_AGENT_INSTALLED": "true"
+    } if install_agent else {
+        "AMBARI_SERVER_INSTALLED": "true"
+    }
     return _build_ambari_image(
         ambari_repo_url,
         base_image_name,
         "server",
         additional_labels=add_labels,
+        env_variables=env_variables,
         install_agent=install_agent
     )
 
 
 def build_ambari_agent_image(ambari_repo_url: str, base_image_name: str = None):
-    return _build_ambari_image(ambari_repo_url, base_image_name, "agent")
+    return _build_ambari_image(
+        ambari_repo_url,
+        base_image_name,
+        "agent",
+        env_variables={
+            "AMBARI_AGENT_INSTALLED": "true"
+        }
+    )

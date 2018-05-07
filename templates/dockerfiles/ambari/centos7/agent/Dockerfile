@@ -6,3 +6,4 @@ ENV {{ label }}
 {%- endfor %}
 RUN curl {{ repo_file_url }} > /etc/yum.repos.d/ambari.repo
 RUN yum install ambari-agent -y
+# TODO fix as in server Dockerfile
