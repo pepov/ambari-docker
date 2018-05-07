@@ -1,16 +1,17 @@
-import urllib.parse
+import os
 import subprocess
+import urllib.parse
 import uuid
-
-from ambari_docker.config import jinja_env, image_prefix
-
 import docker
 import docker.errors
+import sys
+from ambari_docker.config import jinja_env, image_prefix
+from ambari_docker.utils import TempDirectory, copytree
 
 docker_client = docker.from_env()
 
 _os_to_image = {
-    'centos7': 'centos/systemd'
+    'centos7': 'centos:7'
 }
 
 
@@ -32,6 +33,26 @@ def _parse_base_image(base_image_name, repo_os):
     return base_image_name, base_stacks, base_builds
 
 
+def _get_base_image_info(base_image_name, repo_os):
+    if not base_image_name:
+        base_image_name = _os_to_image[repo_os]
+    try:
+        base_image = docker_client.images.get(base_image_name)
+    except docker.errors.ImageNotFound:
+        base_image = docker_client.images.pull(base_image_name)
+
+    labels = {}
+    for key, value in base_image.labels.items():
+        if key.startswith("ambari."):
+            labels[key] = value
+
+    if 'ambari.os' in labels:
+        if labels['ambari.os'] != repo_os:
+            raise Exception(f"Base image os('{base_image.labels['os']}') is not a repo os '{os}'")
+
+    return base_image_name, labels
+
+
 def build_stack_image(stack_repo_url: str, base_image_name: str = None,
                       image_name_template="{PREFIX}/{NAME}:{TAG}") -> str:
     url = urllib.parse.urlparse(stack_repo_url)
@@ -44,7 +65,7 @@ def build_stack_image(stack_repo_url: str, base_image_name: str = None,
                                                      TAG=str(uuid.uuid4()))
 
     template = jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
-
+    template_directory = os.path.dirname(os.path.abspath(template.filename))
     base_image_name, base_stacks, base_builds = _parse_base_image(base_image_name, repo_os)
 
     stacks = ",".join(sorted(base_stacks + [repo_stack]))
@@ -70,19 +91,110 @@ def build_stack_image(stack_repo_url: str, base_image_name: str = None,
     return resulting_image_tag
 
 
+def _build_docker_image(image_tag, base_dir, docker_file_content):
+    """
+    Builds docker image with tag *image_tag*.
+
+    Files in *base_dir* will be copied to temporary folder.
+    *docker_file_content* string will be written to Dockerfile located in temporary folder where files from *base_dir*
+    were copied. "docker build" command will be executed in newly created temporary folder.
+
+    We need this kind of hacks in order to make relative path for commands like "COPY" in Dockerfiles work properly.
+
+    :param image_tag:
+    :param base_dir:
+    :param docker_file_content:
+    :return:
+    """
+    with TempDirectory() as tmp_dir:
+        print(f"Dockerfile content:")
+        sys.stdout.flush()
+        print(docker_file_content, file=sys.stderr)
+        print(f"Building image '{image_tag}' in directory '{tmp_dir.path}'...")
+        print()
+
+        copytree(base_dir, tmp_dir.path)
+        dest_dockerfile = os.path.join(tmp_dir.path, "Dockerfile")
+        open(dest_dockerfile, "w").write(docker_file_content)
+
+        subprocess.run(
+            f'docker build -t {image_tag} .',
+            shell=True,
+            cwd=tmp_dir.path
+        )
+
+
 def append_stack_image(stack_repo_url: str, base_stack_image: str, mix_name: str) -> str:
     return build_stack_image(stack_repo_url, base_stack_image, "{PREFIX}/" + mix_name + ":{TAG}")
 
 
-def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None):
-    ambari_package_image = append_stack_image(ambari_repo_url, base_image_name, "ambari")
+def build_ambari_image(
+        ambari_repo_url: str,
+        base_image_name: str = None,
+        component: str = "server",
+        additional_labels=None,
+        **kwargs
+):
+    if additional_labels is None:
+        additional_labels = {}
 
-    resulting_image_tag = f"ambari/{stack_image.replace(':', '_')}:{build}"
-    # TODO implement this
+    url = urllib.parse.urlparse(ambari_repo_url)
+    path_parts = url.path.split('/')
+
+    repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
+    repo_file_url = f"{ambari_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
+    base_image_name, labels = _get_base_image_info(base_image_name, repo_os)
+
+    if 'ambari.repo' in labels and labels['ambari.repo'] != ambari_repo_url:
+        raise Exception(f"Base image already have repo '{ambari_repo_url}'")
+    else:
+        labels['ambari.repo'] = ambari_repo_url
+    if 'ambari.build' in labels and labels['ambari.build'] != repo_build:
+        raise Exception(f"Base image already have repo build '{repo_build}'")
+    else:
+        labels['ambari.build'] = repo_build
+
+    labels['ambari.os'] = repo_os
+
+    if f'ambari.{component}' in labels and labels[f'ambari.{component}'] == "true":
+        raise Exception(f"Base image already have ambari-{component}")
+    else:
+        labels[f'ambari.{component}'] = "true"
+
+    for label_key, label_value in additional_labels.items():
+        if label_key in labels and labels[label_key] != label_value:
+            raise Exception(f"Base image already have label '{label_key}=\"{labels[label_key]}\"'")
+        else:
+            labels[label_key] = label_value
+
+    template = jinja_env.get_template(f"dockerfiles/ambari/{repo_os}/{component}/Dockerfile")
+    template_directory = os.path.dirname(os.path.abspath(template.filename))
+    dockerfile_content = template.render(
+        repo_file_url=repo_file_url,
+        labels=[f'{key}="{value}"' for key, value in labels.items()],
+        base_image=base_image_name,
+        **kwargs
+    )
+    resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
+
+    _build_docker_image(resulting_image_tag, template_directory, dockerfile_content)
+
+    return resulting_image_tag
 
 
-# build_ambari_server_image("http://s3.amazonaws.com/dev.hortonworks.com/ambari/centos7/2.x/BUILDS/2.7.0.0-451",
-#                           "crs/hdf/centos7:3.2.0.0-275")
-# print(build_stack_image("http://s3.amazonaws.com/dev.hortonworks.com/HDF/centos7/3.x/BUILDS/3.2.0.0-275"))
-print(append_stack_image("http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos7/3.x/BUILDS/3.0.0.0-1296",
-                         "crs/hdf:420f8209-ef9c-462d-8d86-4bd49dec3788", "hdp_hdf"))
+def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None, install_agent: bool = True):
+    add_labels = {"ambari.agent": "true"} if install_agent else {}
+    return build_ambari_image(
+        ambari_repo_url,
+        base_image_name,
+        "server",
+        additional_labels=add_labels,
+        install_agent=install_agent
+    )
+
+
+def build_ambari_agent_image(ambari_repo_url: str, base_image_name: str = None):
+    return build_ambari_image(ambari_repo_url, base_image_name, "agent")
+
+
+print(build_ambari_server_image("http://s3.amazonaws.com/dev.hortonworks.com/ambari/centos7/2.x/BUILDS/2.7.0.0-451"))
