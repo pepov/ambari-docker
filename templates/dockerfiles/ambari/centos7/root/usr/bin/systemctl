@@ -86,7 +86,7 @@ ARGS_MAP = {
     ('stop', 'postgresql'): pg_sql_stop,
     ('reload', 'postgresql'): pg_sql_reload
 }
-
+# TODO add mock for "service chronyd status" command
 if __name__ == "__main__":
     args = sys.argv[1:]
     ARGS_MAP.get(tuple(args), default_error)(args)

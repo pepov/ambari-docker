@@ -1,9 +1,8 @@
-{%- macro systemd(name, image, suffix, domain, cmd) %}
+{%- macro systemd(name, image, suffix, domain, server_hostname, cmd) %}
   {{- name }}:
     image: "{{ image }}"
     container_name: "{{ name }}.{{ suffix }}"
     hostname: "{{ name }}.{{ suffix }}.{{ domain }}"
-    command: {{ cmd }}
     networks:
     - cluster_net
     environment:

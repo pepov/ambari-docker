@@ -1,9 +1,9 @@
 {% import 'macro.yml' as macro -%}
 version: '3.5'
 services:
-  {{ macro.systemd(server_hostname, server_image, suffix, domain, "/usr/bin/start-ambari-server")}}
+  {{ macro.systemd(server_hostname, server_image, suffix, domain, server_hostname)}}
   {%- for node in nodes %}
-  {{ macro.systemd(node, agent_image, suffix, domain, "/usr/bin/start-ambari-agent")}}
+  {{ macro.systemd(node, agent_image, suffix, domain, server_hostname)}}
   {%- endfor %}
 networks:
   cluster_net:
