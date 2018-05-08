@@ -93,7 +93,7 @@ def _get_base_image_info(base_image_name, repo_os):
 # def append_stack_image(stack_repo_url: str, base_stack_image: str, mix_name: str) -> str:
 #     return build_stack_image(stack_repo_url, base_stack_image, "{PREFIX}/" + mix_name + ":{TAG}")
 
-def _build_docker_image(image_tag, base_dir, docker_file_content):
+def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_name):
     """
     Builds docker image with tag *image_tag*.
 
@@ -106,6 +106,7 @@ def _build_docker_image(image_tag, base_dir, docker_file_content):
     :param image_tag:
     :param base_dir:
     :param docker_file_content:
+    :param docker_file_name:
     :return:
     """
     with TempDirectory() as tmp_dir:
@@ -116,11 +117,11 @@ def _build_docker_image(image_tag, base_dir, docker_file_content):
         print()
 
         copytree(base_dir, tmp_dir.path)
-        dest_dockerfile = os.path.join(tmp_dir.path, "Dockerfile")
+        dest_dockerfile = os.path.join(tmp_dir.path, docker_file_name)
         open(dest_dockerfile, "w").write(docker_file_content)
 
         subprocess.run(
-            f'docker build -t {image_tag} .',
+            f'docker build -t {image_tag} -f {docker_file_name} .',
             shell=True,
             cwd=tmp_dir.path
         )
@@ -132,6 +133,7 @@ def _build_ambari_image(
         component: str = "server",
         additional_labels=None,
         env_variables=None,
+        packages=(),
         **kwargs
 ):
     """
@@ -142,6 +144,8 @@ def _build_ambari_image(
     :param base_image_name: base image for resulting image
     :param component: component name, can be 'server' or 'agent'
     :param additional_labels: additional labels to be added to resulting image
+    :param env_variables: environment variables to be set
+    :param packages: packages to be installed in to image, can not be empty
     :param kwargs: key-value arguments that will be passed to Dockerfile template
 
     :return: resulting image tag
@@ -150,6 +154,8 @@ def _build_ambari_image(
         additional_labels = {}
     if env_variables is None:
         env_variables = {}
+    if not packages:
+        raise Exception("Some ambari packages need to be specified")
 
     url = urllib.parse.urlparse(ambari_repo_url)
     path_parts = url.path.split('/')
@@ -186,17 +192,18 @@ def _build_ambari_image(
     if env_variables:
         kwargs['environment'] = " ".join([f'{k}="{v}"' for k, v in env_variables.items()])
 
-    template = jinja_env.get_template(f"dockerfiles/ambari/{repo_os}/{component}/Dockerfile")
+    template = jinja_env.get_template(f"dockerfiles/ambari/{repo_os}/Dockerfile.{component}")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
     dockerfile_content = template.render(
         repo_file_url=repo_file_url,
         base_image=base_image_name,
+        packages=packages,
         **kwargs
     )
     print(dockerfile_content)
     resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
 
-    _build_docker_image(resulting_image_tag, template_directory, dockerfile_content)
+    _build_docker_image(resulting_image_tag, template_directory, dockerfile_content, f"Dockerfile.{component}")
 
     return resulting_image_tag
 
@@ -209,13 +216,15 @@ def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None,
     } if install_agent else {
         "AMBARI_SERVER_INSTALLED": "true"
     }
+    packages = ("ambari-server", "ambari-agent") if install_agent else ("ambari-server",)
     return _build_ambari_image(
         ambari_repo_url,
         base_image_name,
         "server",
         additional_labels=add_labels,
         env_variables=env_variables,
-        install_agent=install_agent
+        install_agent=install_agent,
+        packages=packages
     )
 
 
@@ -226,5 +235,6 @@ def build_ambari_agent_image(ambari_repo_url: str, base_image_name: str = None):
         "agent",
         env_variables={
             "AMBARI_AGENT_INSTALLED": "true"
-        }
+        },
+        packages=("ambari-agent",)
     )

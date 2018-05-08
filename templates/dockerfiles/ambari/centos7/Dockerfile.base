@@ -1,0 +1,13 @@
+FROM {{ base_image }}
+MAINTAINER "Eugene Chekanskiy" <echekanskiy@hortonworks.com>
+{%- if label is defined %}
+LABEL {{ label }}
+{%- endif %}
+{%- if environment is defined %}
+ENV {{ environment }}
+{%- endif %}
+# install base packages TODO build psutil in separate stage to wheel package to reduce image size
+RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python get-pip.py && rm -f get-pip.py && \
+    yum install gcc python-devel -y && pip install psutil requests supervisor
+RUN curl {{ repo_file_url }} > /etc/yum.repos.d/ambari.repo && \
+    yum install {{ packages|join(' ') }} -y

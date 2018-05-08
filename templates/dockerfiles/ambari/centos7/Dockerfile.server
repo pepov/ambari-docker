@@ -1,0 +1,12 @@
+{% include 'Dockerfile.base' %}
+# install helper scripts
+COPY root /
+COPY root_server /
+{%- if install_agent %}
+COPY root_agent/ /
+{%- endif %}
+# do initial setup
+RUN ambari-server setup -s
+# make supervisord as start point
+ENTRYPOINT /usr/bin/supervisord
+CMD ["-c", "/etc/supervisor.conf"]
