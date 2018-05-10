@@ -1,10 +1,13 @@
-{%- macro systemd(name, image, suffix, domain, server_hostname, cmd) %}
+{%- macro systemd(name, image, suffix, domain, server_hostname) %}
   {{- name }}:
     image: "{{ image }}"
     container_name: "{{ name }}.{{ suffix }}"
     hostname: "{{ name }}.{{ suffix }}.{{ domain }}"
     networks:
-    - cluster_net
+     - cluster_net
     environment:
       AMBARI_SERVER_HOSTNAME: "{{ server_hostname }}.{{ suffix }}.{{ domain }}"
+    cap_add:
+     - SYS_ADMIN
+     - SYS_RESOURCE
 {%- endmacro %}

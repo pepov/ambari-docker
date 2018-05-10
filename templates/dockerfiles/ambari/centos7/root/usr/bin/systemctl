@@ -8,12 +8,50 @@ PG_ENV = {
     "PGPORT": "5432"
 }
 
-STATUS_CMD = 'su postgres -c "/usr/bin/pg_ctl status -D ${PGDATA}"'
-START_CMD = 'su postgres -c "/usr/bin/postgresql-check-db-dir ${PGDATA} && /usr/bin/pg_ctl start -D ${PGDATA} -s -o \\"-p ${PGPORT}\\" -w -t 300 > /tmp/pgsql.log"'
+PG_STATUS_CMD = 'su postgres -c "/usr/bin/pg_ctl status -D ${PGDATA}"'
+PG_START_CMD = 'su postgres -c "/usr/bin/postgresql-check-db-dir ${PGDATA} && /usr/bin/pg_ctl start -D ${PGDATA} -s -o \\"-p ${PGPORT}\\" -w -t 300 > /tmp/pgsql.log"'
 # note "> /tmp/pgsql.log", we need this because of sick "feature" of pg_ctl, it will pass your stdout to background process
 # causing subprocess.check_output hangs with zombie su process :)
-STOP_CMD = 'su postgres -c "/usr/bin/pg_ctl stop -D ${PGDATA} -s -m fast"'
-RELOAD_CMD = 'su postgres -c "/usr/bin/pg_ctl reload -D ${PGDATA} -s"'
+PG_STOP_CMD = 'su postgres -c "/usr/bin/pg_ctl stop -D ${PGDATA} -s -m fast"'
+PG_RELOAD_CMD = 'su postgres -c "/usr/bin/pg_ctl reload -D ${PGDATA} -s"'
+
+KRB_5_KDC_START_CMD = ". /etc/sysconfig/krb5kdc; /usr/sbin/krb5kdc -P /var/run/krb5kdc.pid $KRB5KDC_ARGS"
+KRB_5_KDC_STOP_CMD = "kill $(cat /var/run/krb5kdc.pid)"
+KRB_5_KDC_STATUS_CMD = "kill -0 $(cat /var/run/krb5kdc.pid)"
+KRB_5_KDC_RELOAD_CMD = "kill -HUP $(cat /var/run/krb5kdc.pid)"
+
+KADMIN_START_CMD = ". /etc/sysconfig/kadmin; /usr/sbin/_kadmind -P /var/run/kadmind.pid $KADMIND_ARGS"
+KADMIN_STOP_CMD = "kill $(cat /var/run/kadmind.pid)"
+KADMIN_STATUS_CMD = "kill -0 $(cat /var/run/kadmind.pid)"
+KADMIN_RELOAD_CMD = "kill -HUP $(cat /var/run/kadmind.pid)"
+
+
+def EXIT_CODE_TEST_FUNCTION(cmd):
+    def fun(_):
+        output, code = run(cmd)
+        if code == 0:
+            sys.exit(0)
+        else:
+            sys.exit(3)
+
+    return fun
+
+
+def make_exit_code_mapping(call_map, service_name, start_cmd, stop_cmd, status_cmd, reload_cmd):
+    call_map[("status", service_name)] = EXIT_CODE_TEST_FUNCTION(status_cmd)
+    call_map[("start", service_name)] = EXIT_CODE_TEST_FUNCTION(start_cmd)
+    call_map[("stop", service_name)] = EXIT_CODE_TEST_FUNCTION(stop_cmd)
+    call_map[("reload", service_name)] = EXIT_CODE_TEST_FUNCTION(reload_cmd)
+
+
+def pg_sql_status(_):
+    output, code = run(PG_STATUS_CMD, PG_ENV)
+    if "pg_ctl: no server running" in output:
+        print("stopped")
+        sys.exit(3)
+    if "pg_ctl: server is running" in output:
+        print("running")
+        sys.exit(0)
 
 
 def run(cmd, env=None):
@@ -35,7 +73,7 @@ def pg_sql_show_env(_):
 
 
 def pg_sql_status(_):
-    output, code = run(STATUS_CMD, PG_ENV)
+    output, code = run(PG_STATUS_CMD, PG_ENV)
     if "pg_ctl: no server running" in output:
         print("stopped")
         sys.exit(3)
@@ -45,7 +83,7 @@ def pg_sql_status(_):
 
 
 def pg_sql_start(_):
-    output, code = run(START_CMD, PG_ENV)
+    output, code = run(PG_START_CMD, PG_ENV)
     if code == 0:
         sys.exit(0)
     else:
@@ -54,7 +92,7 @@ def pg_sql_start(_):
 
 
 def pg_sql_stop(_):
-    output, code = run(STOP_CMD, PG_ENV)
+    output, code = run(PG_STOP_CMD, PG_ENV)
     if code == 0:
         sys.exit(0)
     else:
@@ -66,7 +104,7 @@ def pg_sql_stop(_):
 
 
 def pg_sql_reload(_):
-    output, code = run(RELOAD_CMD, PG_ENV)
+    output, code = run(PG_RELOAD_CMD, PG_ENV)
     if code == 0:
         sys.exit(0)
     else:
@@ -86,7 +124,30 @@ ARGS_MAP = {
     ('stop', 'postgresql'): pg_sql_stop,
     ('reload', 'postgresql'): pg_sql_reload
 }
+
+make_exit_code_mapping(
+    ARGS_MAP,
+    "krb5kdc",
+    KRB_5_KDC_START_CMD,
+    KRB_5_KDC_STOP_CMD,
+    KRB_5_KDC_STATUS_CMD,
+    KRB_5_KDC_RELOAD_CMD
+)
+
+make_exit_code_mapping(
+    ARGS_MAP,
+    "kadmin",
+    KADMIN_START_CMD,
+    KADMIN_STOP_CMD,
+    KADMIN_STATUS_CMD,
+    KADMIN_RELOAD_CMD
+)
+
 # TODO add mock for "service chronyd status" command
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if len(args) >= 2:
+        parts = args[1].split(".")
+        if parts[-1] == "service":
+            args[1] = ".".join(parts[:len(parts)-1])
     ARGS_MAP.get(tuple(args), default_error)(args)
