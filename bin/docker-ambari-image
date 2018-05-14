@@ -6,7 +6,7 @@ import argparse
 from ambari_docker.image_builder import build_ambari_agent_image, build_ambari_server_image
 
 DESCRIPTION = """Simple script to build docker images with Ambari Server and Ambari Agent daemons in it.
-Images will contain necessary bin to run server and agent on container startup. DO NOT provide CMD or ENTRYPOINT
+Images will contain necessary bits to run server and agent on container startup. DO NOT provide CMD or ENTRYPOINT
 for resulting images, they already configured to start supervisorctl.
 """
 
