@@ -59,7 +59,7 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
     with TempDirectory() as tmp_dir:
         print(f"Dockerfile content:")
         sys.stdout.flush()
-        print(docker_file_content, file=sys.stderr)
+        print(docker_file_content)
         print(f"Building image '{image_tag}' in directory '{tmp_dir.path}'...")
         print()
 

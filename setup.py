@@ -24,5 +24,6 @@ setup(
     packages=['ambari_docker'],
     zip_safe=False,
     data_files=get_data_files(),
-    install_requires=['docker', 'jinja2']
+    install_requires=['docker', 'jinja2'],
+    scripts=['bin/docker-ambari-image'],
 )
