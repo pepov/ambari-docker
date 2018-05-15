@@ -1,19 +1,20 @@
 import os
-import subprocess
 import sys
 import urllib.parse
 
 import docker
 import docker.errors
 
-from ambari_docker.config import jinja_env, image_prefix
-from ambari_docker.utils import TempDirectory, copytree
+from ambari_docker import config
+from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color
 
 docker_client = docker.from_env()
 
 _os_to_image = {
     'centos7': 'centos:7'
 }
+
+LOG = config.IMAGE_BUILDER_LOG
 
 
 def _get_base_image_info(base_image_name, repo_os):
@@ -57,21 +58,24 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
     :return:
     """
     with TempDirectory() as tmp_dir:
-        print(f"Dockerfile content:")
-        sys.stdout.flush()
-        print(docker_file_content)
-        print(f"Building image '{image_tag}' in directory '{tmp_dir.path}'...")
-        print()
-
+        LOG.info(f"Building docker image '{image_tag}' with context directory '{tmp_dir.path}'...")
+        if config.log_dockerfile:
+            LOG.debug("dockerfile content:")
+            print(config.dockerfile_print_color.colorize(docker_file_content))
         copytree(base_dir, tmp_dir.path)
         dest_dockerfile = os.path.join(tmp_dir.path, docker_file_name)
         open(dest_dockerfile, "w").write(docker_file_content)
 
-        subprocess.run(
+        out, code = ProcessRunner(
             f'docker build -t {image_tag} -f {docker_file_name} .',
-            shell=True,
-            cwd=tmp_dir.path
-        )
+            cwd=tmp_dir.path,
+            text_color=Color.Cyan,
+            prepend_color=Color.Blue,
+            silent=not config.log_docker_cmd_output
+        ).communicate()
+        if code != 0:
+            raise Exception(f"Failed to build image {image_tag}")
+        LOG.info(f"Successfully build image '{image_tag}'")
 
 
 def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs) -> str:
@@ -81,7 +85,7 @@ def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs
     repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
     repo_file_url = f"{stack_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
     repo_name = f"{repo_stack}-{repo_build}"
-    resulting_image_tag = f"{image_prefix}/{repo_stack.lower()}:{repo_build}"
+    resulting_image_tag = f"{config.image_prefix}/{repo_stack.lower()}:{repo_build}"
     base_image_name, labels = _get_base_image_info(base_image_name, repo_os)
 
     labels[f"{repo_stack.lower()}.repo"] = stack_repo_url
@@ -91,7 +95,7 @@ def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs
     if labels:
         kwargs['label'] = " ".join([f'{k}="{v}"' for k, v in labels.items()])
 
-    template = jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
+    template = config.jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
 
     dockerfile_content = template.render(
@@ -171,7 +175,7 @@ def _build_ambari_image(
     if env_variables:
         kwargs['environment'] = " ".join([f'{k}="{v}"' for k, v in env_variables.items()])
 
-    template = jinja_env.get_template(f"dockerfiles/ambari/{repo_os}/Dockerfile.{component}")
+    template = config.jinja_env.get_template(f"dockerfiles/ambari/{repo_os}/Dockerfile.{component}")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
     dockerfile_content = template.render(
         repo_file_url=repo_file_url,
@@ -179,8 +183,7 @@ def _build_ambari_image(
         packages=packages,
         **kwargs
     )
-    print(dockerfile_content)
-    resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
+    resulting_image_tag = f"{config.image_prefix}/ambari/{component}:{repo_build}"
 
     _build_docker_image(resulting_image_tag, template_directory, dockerfile_content, f"Dockerfile.{component}")
 
