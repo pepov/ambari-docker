@@ -1,5 +1,4 @@
 import os
-import sys
 import urllib.parse
 
 import docker
@@ -23,6 +22,7 @@ def _get_base_image_info(base_image_name, repo_os):
     try:
         base_image = docker_client.images.get(base_image_name)
     except docker.errors.ImageNotFound:
+        LOG.info(f"Trying to pull base image '{base_image_name}'")
         base_image = docker_client.images.pull(base_image_name)
 
     labels = {}
