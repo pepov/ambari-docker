@@ -5,7 +5,7 @@ import docker
 import docker.errors
 
 from ambari_docker import config
-from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color
+from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color, download_file
 
 docker_client = docker.from_env()
 
@@ -41,7 +41,7 @@ def _get_base_image_info(base_image_name, repo_os):
     return base_image_name, labels
 
 
-def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_name):
+def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_name, additional_files):
     """
     Builds docker image with tag *image_tag*.
 
@@ -55,10 +55,24 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
     :param base_dir:
     :param docker_file_content:
     :param docker_file_name:
+    :param additional_files: additional files that will be copied to build context
     :return:
     """
     with TempDirectory() as tmp_dir:
         LOG.info(f"Building docker image '{image_tag}' with context directory '{tmp_dir.path}'...")
+
+        for file_destination, source_descriptor in additional_files.items():
+            source_type, source = source_descriptor
+            if "http" in source:
+                if source_type != "file":
+                    raise Exception(f"Source type '{source}' is not compatible with web links")
+                dest_dir = os.path.join(tmp_dir.path, os.path.dirname(file_destination).lstrip("/"))
+                os.makedirs(dest_dir)
+                dest_path = os.path.join(tmp_dir.path, file_destination.lstrip("/"))
+                LOG.info(f"Trying to download '{source}' to '{dest_path}'")
+                download_file(source, dest_path)
+                LOG.info(f"Downloaded '{source}' to '{dest_path}'")
+            # TODO local, ssh files support, directory support
         if config.log_dockerfile:
             LOG.debug("dockerfile content:")
             print(config.dockerfile_print_color.colorize(docker_file_content))
@@ -117,6 +131,7 @@ def _build_ambari_image(
         additional_labels=None,
         env_variables=None,
         packages=(),
+        additional_files=None,
         **kwargs
 ):
     """
@@ -133,6 +148,10 @@ def _build_ambari_image(
 
     :return: resulting image tag
     """
+
+    if additional_files is None:
+        additional_files = {}
+
     if additional_labels is None:
         additional_labels = {}
     if env_variables is None:
@@ -185,12 +204,31 @@ def _build_ambari_image(
     )
     resulting_image_tag = f"{config.image_prefix}/ambari/{component}:{repo_build}"
 
-    _build_docker_image(resulting_image_tag, template_directory, dockerfile_content, f"Dockerfile.{component}")
+    _build_docker_image(resulting_image_tag, template_directory, dockerfile_content, f"Dockerfile.{component}",
+                        additional_files)
 
     return resulting_image_tag
 
 
-def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None, install_agent: bool = True):
+def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None, install_agent: bool = True,
+                              mpacks=None):
+    if mpacks is None:
+        mpacks = []
+
+    kwargs = {}
+
+    additional_files = {}
+    mpacks_paths = []
+
+    for mpack in mpacks:
+        mpack_name = os.path.basename(mpack)
+        mpack_path = f"/mpacks/{mpack_name}"
+        additional_files[mpack_path] = ("file", mpack)
+        mpacks_paths.append(f"/root/mpacks/{mpack_name}")
+
+    if mpacks_paths:
+        kwargs["mpacks"] = mpacks_paths
+
     add_labels = {"ambari.agent": "true"} if install_agent else {}
     env_variables = {
         "AMBARI_SERVER_INSTALLED": "true",
@@ -206,7 +244,9 @@ def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None,
         additional_labels=add_labels,
         env_variables=env_variables,
         install_agent=install_agent,
-        packages=packages
+        packages=packages,
+        additional_files=additional_files,
+        **kwargs
     )
 
 

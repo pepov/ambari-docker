@@ -7,4 +7,10 @@ COPY root_agent/ /
 {%- endif %}
 # do initial setup
 RUN ambari-server setup -s
+{%- if mpacks is defined %}
+COPY mpacks/ /root/mpacks
+{%- for mpack in mpacks %}
+RUN ambari-server install-mpack --mpack {{ mpack }}
+{%- endfor %}
+{%- endif %}
 {% include 'Dockerfile.footer' %}

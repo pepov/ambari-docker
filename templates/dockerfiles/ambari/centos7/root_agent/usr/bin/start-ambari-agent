@@ -28,24 +28,29 @@ def error(message):
     sys.stdout.flush()
 
 
-def execute_process(cmd, env=None, do_color=False, color='\033[92m'):
+def execute_process(cmd, env=None, do_color=False, color='\033[92m', print_output=True):
+    if print_output:
+        std_out = sys.stdout
+    else:
+        std_out = open(os.devnull, "w")
+
     proc = subprocess.Popen(
         cmd,
         shell=True,
         env=env,
         stderr=subprocess.STDOUT,
-        stdout=sys.stdout
+        stdout=std_out
     )
 
     if do_color:
-        sys.stdout.write(color)
-        sys.stdout.flush()
+        std_out.write(color)
+        std_out.flush()
 
     proc.communicate()
 
     if do_color:
-        sys.stdout.write("\x1b[0m")
-        sys.stdout.flush()
+        std_out.write("\x1b[0m")
+        std_out.flush()
 
     return proc.returncode
 
@@ -61,12 +66,12 @@ def start_ambari_agent_process():
     info("About to start ambari-agent...")
     if execute_process("ambari-agent reset {0}".format(AMBARI_SERVER_HOSTNAME), do_color=True) != 0:
         raise Exception("Failed to set server hostname")
-    code = execute_process("ambari-agent start", do_color=True)
-    if code != 0:
-        raise Exception("Failed to start agent")
-    process = psutil.Process(pid=_pid_from_file(AGENT_PID_FILE))
+    execute_process("ambari-agent start", do_color=True)
     info("Ambari agent started")
-    return process
+    agent_status = execute_process("ambari-agent status")
+    while agent_status == 0:
+        time.sleep(5)
+        agent_status = execute_process("ambari-agent status")
 
 
 def stop_ambari_agent_process():
@@ -84,8 +89,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, stop_handler)
     signal.signal(signal.SIGINT, stop_handler)
 
-    agent_process = start_ambari_agent_process()
-    agent_process.wait()
+    start_ambari_agent_process()
 
     error("Agent stopped externally")
     sys.exit(1)

@@ -24,6 +24,8 @@ parser.add_argument("-abi", "--agent-base-image", help="agent base image", defau
 parser.add_argument("-v", "--verbose", help="print docker commands output", action='store_true', default=False)
 parser.add_argument("-vv", "--very-verbose", help="print docker commands output and docker files content",
                     action='store_true', default=False)
+parser.add_argument("-m", "--mpacks", help="mpack to be included in server image",
+                    nargs="+", type=str, default=[])
 options = parser.parse_args()
 
 if __name__ == "__main__":
@@ -50,10 +52,8 @@ if __name__ == "__main__":
     if options.client:
         agent_image = build_ambari_agent_image(options.repository, options.agent_base_image)
     if options.server:
-        if options.server_include_client:
-            server_image = build_ambari_server_image(options.repository, agent_image)
-        else:
-            server_image = build_ambari_server_image(options.repository, options.server_base_image)
+        base_server_image = agent_image if options.server_include_client else options.server_base_image
+        server_image = build_ambari_server_image(options.repository, options.server_base_image, mpacks=options.mpacks)
 
     if options.client:
         LOG.info(f"Resulting agent image :{agent_image}")

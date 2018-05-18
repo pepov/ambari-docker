@@ -1,5 +1,5 @@
 {% import 'macro.yml' as macro -%}
-version: '3.5'
+version: '2.4'
 services:
   {{ macro.systemd(server_hostname, server_image, suffix, domain, server_hostname)}}
   {%- for node in nodes %}

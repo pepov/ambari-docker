@@ -10,4 +10,5 @@
     cap_add:
      - SYS_ADMIN
      - SYS_RESOURCE
+    mem_limit: 2G
 {%- endmacro %}

@@ -1,15 +1,16 @@
 import enum
 import fcntl
+import io
 import os
 import select
 import shutil
+import subprocess
 import sys
 import tempfile
-import uuid
-import subprocess
-import io
-
 import time
+import uuid
+
+import requests
 
 
 def copytree(src, dst, symlinks=False, ignore=None):
@@ -20,6 +21,14 @@ def copytree(src, dst, symlinks=False, ignore=None):
             shutil.copytree(s, d, symlinks, ignore)
         else:
             shutil.copy2(s, d)
+
+
+def download_file(url, destination):
+    r = requests.get(url, stream=True)
+    with open(destination, 'wb') as f:
+        for chunk in r.iter_content(chunk_size=1024):
+            if chunk:
+                f.write(chunk)
 
 
 class TempDirectory(object):
