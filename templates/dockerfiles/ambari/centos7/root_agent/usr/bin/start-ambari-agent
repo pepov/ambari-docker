@@ -64,14 +64,13 @@ def run_cmd(*args, **kwargs):
 
 def start_ambari_agent_process():
     info("About to start ambari-agent...")
-    if execute_process("ambari-agent reset {0}".format(AMBARI_SERVER_HOSTNAME), do_color=True) != 0:
-        raise Exception("Failed to set server hostname")
+    execute_process("ambari-agent reset {0}".format(AMBARI_SERVER_HOSTNAME), do_color=True)
     execute_process("ambari-agent start", do_color=True)
     info("Ambari agent started")
-    agent_status = execute_process("ambari-agent status")
+    agent_status = execute_process("ambari-agent status", print_output=False)
     while agent_status == 0:
         time.sleep(5)
-        agent_status = execute_process("ambari-agent status")
+        agent_status = execute_process("ambari-agent status", print_output=False)
 
 
 def stop_ambari_agent_process():
