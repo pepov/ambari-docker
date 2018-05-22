@@ -5,7 +5,7 @@ import docker
 import docker.errors
 
 from ambari_docker import config
-from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color, download_file
+from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color, download_file, copy_file
 
 docker_client = docker.from_env()
 
@@ -63,16 +63,21 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
 
         for file_destination, source_descriptor in additional_files.items():
             source_type, source = source_descriptor
+            dest_dir = os.path.join(tmp_dir.path, os.path.dirname(file_destination).lstrip("/"))
+            os.makedirs(dest_dir)
+            dest_path = os.path.join(tmp_dir.path, file_destination.lstrip("/"))
             if "http" in source:
                 if source_type != "file":
                     raise Exception(f"Source type '{source}' is not compatible with web links")
-                dest_dir = os.path.join(tmp_dir.path, os.path.dirname(file_destination).lstrip("/"))
-                os.makedirs(dest_dir)
-                dest_path = os.path.join(tmp_dir.path, file_destination.lstrip("/"))
                 LOG.info(f"Trying to download '{source}' to '{dest_path}'")
                 download_file(source, dest_path)
                 LOG.info(f"Downloaded '{source}' to '{dest_path}'")
-            # TODO local, ssh files support, directory support
+            else:
+                if os.path.exists(source):
+                    copy_file(source, dest_path)
+                else:
+                    raise Exception(f"Source file '{source}' does not exists")
+            # TODO ssh files support, directory support
         if config.log_dockerfile:
             LOG.debug("dockerfile content:")
             print(config.dockerfile_print_color.colorize(docker_file_content))

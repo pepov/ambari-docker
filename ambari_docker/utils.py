@@ -23,6 +23,10 @@ def copytree(src, dst, symlinks=False, ignore=None):
             shutil.copy2(s, d)
 
 
+def copy_file(src, dst):
+    shutil.copy(src, dst)
+
+
 def download_file(url, destination):
     r = requests.get(url, stream=True)
     with open(destination, 'wb') as f:
