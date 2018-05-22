@@ -12,6 +12,7 @@ DESCRIPTION = """Tool for generation of docker-compose.yml file based on ambari 
 """
 
 parser = argparse.ArgumentParser(description=DESCRIPTION)
+parser.add_argument("-s", "--suffix", help="suffix to distinct container names(default=cl1)", default="cl1")
 parser.add_argument("-nc", "--node-count", help="count of agent nodes(default=1)", default=1)
 parser.add_argument("-m", "--memory", help="memory limit per container(default=2G)", default="2G")
 parser.add_argument("-an", "--agent-name", help="agent node name template(default=node.{number})",
@@ -58,7 +59,8 @@ def main():
         domain=options.network_name,
         nodes=nodes,
         server_image=options.server_image,
-        agent_image=options.agent_image
+        agent_image=options.agent_image,
+        suffix=options.suffix
     )
     print(result)
 
