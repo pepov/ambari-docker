@@ -36,7 +36,7 @@ if __name__ == "__main__":
         options.server = True
         options.client = True
         if options.server_base_image:
-            print("warning, '--server-base-image'('-sbi') option ignored because server image will \
+            LOG.info("warning, '--server-base-image'('-sbi') option ignored because server image will \
             be based on agent image")
 
     if options.verbose:

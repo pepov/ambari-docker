@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+from __future__ import print_function
+
+import argparse
+
+import docker
+from docker.models.images import Image
+
+from ambari_docker import config
+
+DESCRIPTION = """Tool for generation of docker-compose.yml file based on ambari images.
+"""
+
+parser = argparse.ArgumentParser(description=DESCRIPTION)
+parser.add_argument("-nc", "--node-count", help="count of agent nodes(default=1)", default=1)
+parser.add_argument("-m", "--memory", help="memory limit per container(default=2G)", default="2G")
+parser.add_argument("-an", "--agent-name", help="agent node name template(default=node.{number})",
+                    default="node.{number}")
+parser.add_argument("-sn", "--server-name", help="server node name template(default=server)", default="server")
+parser.add_argument("-nn", "--network-name", help="network name(default=ambari.test)", default="ambari.test")
+parser.add_argument("-si", "--server-image", help="server image", default=None)
+parser.add_argument("-ai", "--agent-image", help="agent image", default=None)
+parser.add_argument("-l", "--list", help="list available images", action='store_true', default=False)
+
+
+def is_ambari_image(docker_image: Image):
+    for label_name, label_value in docker_image.labels.items():
+        if label_name.startswith("ambari."):
+            return True
+    return False
+
+
+def is_printable_label(label_name: str):
+    return "ambari." in label_name or "hdp." in label_name or "hdf." in label_name
+
+
+def main():
+    options = parser.parse_args()
+    if options.list:
+        client = docker.from_env()
+        for image in client.images.list():  # type: Image
+            if is_ambari_image(image):
+                if image.tags:
+                    print(f"Tags:{','.join(image.tags)}")
+                    for lk, lv in image.labels.items():
+                        if is_printable_label(lk):
+                            print(f"  {lk}:{lv}")
+        return
+    if not options.server_image or not options.agent_image:
+        parser.error("--server-image and --agent-image is mandatory options")
+
+    compose_template = config.jinja_env.get_template("docker-compose.yml")
+    nodes = []
+    for i in range(int(options.node_count)):
+        nodes.append(options.agent_name.format(number=i))
+    result = compose_template.render(
+        server_hostname=options.server_name,
+        domain=options.network_name,
+        nodes=nodes,
+        server_image=options.server_image,
+        agent_image=options.agent_image
+    )
+    print(result)
+
+
+if __name__ == "__main__":
+    main()
