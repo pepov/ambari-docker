@@ -21,12 +21,13 @@ For sure, granting additional capabilities is not secure, but this scripts MUST 
 # Binaries
 #### docker-ambari-image
 ```
-eugene@eugene:~/ambari_is_simple_with_docker$ docker-ambari-image --help
+eugene@eugene-work:~$ docker-ambari-image --help
 usage: docker-ambari-image [-h] [-s] [-c] [-sic] -r REPOSITORY
                            [-sbi SERVER_BASE_IMAGE] [-abi AGENT_BASE_IMAGE]
+                           [-v] [-vv] [-m MPACKS [MPACKS ...]]
 
 Simple script to build docker images with Ambari Server and Ambari Agent
-daemons in it. Images will contain necessary bin to run server and agent on
+daemons in it. Images will contain necessary bits to run server and agent on
 container startup. DO NOT provide CMD or ENTRYPOINT for resulting images, they
 already configured to start supervisorctl.
 
@@ -42,5 +43,39 @@ optional arguments:
                         server base image
   -abi AGENT_BASE_IMAGE, --agent-base-image AGENT_BASE_IMAGE
                         agent base image
+  -v, --verbose         print docker commands output
+  -vv, --very-verbose   print docker commands output and docker files content
+  -m MPACKS [MPACKS ...], --mpacks MPACKS [MPACKS ...]
+                        mpack to be included in server image
 
 ```
+#### docker-ambari-compose
+```
+eugene@eugene-work:~$ docker-ambari-compose --help
+usage: docker-ambari-compose [-h] [-nc NODE_COUNT] [-m MEMORY]
+                             [-an AGENT_NAME] [-sn SERVER_NAME]
+                             [-nn NETWORK_NAME] [-si SERVER_IMAGE]
+                             [-ai AGENT_IMAGE] [-l]
+
+Tool for generation of docker-compose.yml file based on ambari images.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -nc NODE_COUNT, --node-count NODE_COUNT
+                        count of agent nodes(default=1)
+  -m MEMORY, --memory MEMORY
+                        memory limit per container(default=2G)
+  -an AGENT_NAME, --agent-name AGENT_NAME
+                        agent node name template(default=node.{number})
+  -sn SERVER_NAME, --server-name SERVER_NAME
+                        server node name template(default=server)
+  -nn NETWORK_NAME, --network-name NETWORK_NAME
+                        network name(default=ambari.test)
+  -si SERVER_IMAGE, --server-image SERVER_IMAGE
+                        server image
+  -ai AGENT_IMAGE, --agent-image AGENT_IMAGE
+                        agent image
+  -l, --list            list available images
+
+```
+# Usage
