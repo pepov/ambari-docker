@@ -79,4 +79,4 @@ optional arguments:
 
 ```
 # Usage
-https://github.com/crashtua/ambari-docker/wiki/learn-how-to-run-ambari-with-docker
+https://github.com/crashtua/ambari-docker/wiki
