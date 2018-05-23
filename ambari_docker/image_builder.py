@@ -10,7 +10,17 @@ from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color, d
 docker_client = docker.from_env()
 
 _os_to_image = {
-    'centos7': 'centos:7'
+    'centos7': 'centos:7',
+    'amazonlinux2': 'amazonlinux:2'
+}
+
+_os_to_template_path = {
+    'centos7': 'centos7_amazonlinux2',
+    'amazonlinux2': 'centos7_amazonlinux2'
+}
+
+_os_to_packages = {
+    'amazonlinux2': ('tar', 'initscripts')
 }
 
 LOG = config.IMAGE_BUILDER_LOG
@@ -199,7 +209,11 @@ def _build_ambari_image(
     if env_variables:
         kwargs['environment'] = " ".join([f'{k}="{v}"' for k, v in env_variables.items()])
 
-    template = config.jinja_env.get_template(f"dockerfiles/ambari/{repo_os}/Dockerfile.{component}")
+    if repo_os in _os_to_packages:
+        packages = packages + _os_to_packages[repo_os]
+
+    template = config.jinja_env.get_template(
+        f"dockerfiles/ambari/{_os_to_template_path[repo_os]}/Dockerfile.{component}")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
     dockerfile_content = template.render(
         repo_file_url=repo_file_url,
@@ -215,8 +229,12 @@ def _build_ambari_image(
     return resulting_image_tag
 
 
-def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None, install_agent: bool = True,
-                              mpacks=None):
+def build_ambari_server_image(
+        ambari_repo_url: str,
+        base_image_name: str = None,
+        install_agent: bool = True,
+        mpacks=None
+):
     if mpacks is None:
         mpacks = []
 
@@ -235,19 +253,13 @@ def build_ambari_server_image(ambari_repo_url: str, base_image_name: str = None,
         kwargs["mpacks"] = mpacks_paths
 
     add_labels = {"ambari.agent": "true"} if install_agent else {}
-    env_variables = {
-        "AMBARI_SERVER_INSTALLED": "true",
-        "AMBARI_AGENT_INSTALLED": "true"
-    } if install_agent else {
-        "AMBARI_SERVER_INSTALLED": "true"
-    }
     packages = ("ambari-server", "ambari-agent") if install_agent else ("ambari-server",)
+
     return _build_ambari_image(
         ambari_repo_url,
         base_image_name,
         "server",
         additional_labels=add_labels,
-        env_variables=env_variables,
         install_agent=install_agent,
         packages=packages,
         additional_files=additional_files,
@@ -260,8 +272,5 @@ def build_ambari_agent_image(ambari_repo_url: str, base_image_name: str = None):
         ambari_repo_url,
         base_image_name,
         "agent",
-        env_variables={
-            "AMBARI_AGENT_INSTALLED": "true"
-        },
         packages=("ambari-agent",)
     )
