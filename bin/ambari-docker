@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
+import logging
+
 import click
 import typing
 
 from ambari_docker.config import Configuration
 from ambari_docker.image_builder import build_ambari_agent_image, build_ambari_server_image
-from ambari_docker.utils import StdoutLogger
 
-LOG = StdoutLogger()
+
+LOG = logging.getLogger("AmbariDocker")
 
 IMAGE_SHORT_HELP = "build ambari images"
 COMPOSE_SHORT_HELP = "create compose file"
@@ -159,11 +161,9 @@ def image(**kwargs):
             mpack: typing.List[str],
             verbose: int
     ):
-        agent_image = build_ambari_agent_image(repository, agent_base_image, j2_env=context['j2_env'], logger=LOG,
-                                               verbosity=verbose)
+        agent_image = build_ambari_agent_image(repository, agent_base_image, j2_env=context['j2_env'])
         server_base_image = agent_image if include_agent else server_base_image
-        server_image = build_ambari_server_image(repository, server_base_image, mpacks=mpack, j2_env=context['j2_env'],
-                                                 logger=LOG, verbosity=verbose)
+        server_image = build_ambari_server_image(repository, server_base_image, mpacks=mpack, j2_env=context['j2_env'])
 
         LOG.info(f"Resulting agent image :{agent_image}")
         LOG.info(f"Resulting server image:{server_image}")
@@ -232,4 +232,7 @@ def compose(**kwargs):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)-15s [%(levelname)s] [%(name)s] %(message)s')
+    logging.getLogger("requests").setLevel(logging.ERROR)
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
     cli()

@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import tempfile
@@ -5,8 +6,6 @@ import zipfile
 
 import pkg_resources
 from jinja2 import Environment, FileSystemLoader
-
-from ambari_docker.utils import Color, StdoutLogger
 
 
 class RelEnvironment(Environment):
@@ -17,7 +16,7 @@ class RelEnvironment(Environment):
 
 
 class Configuration(object):
-    LOG = StdoutLogger()
+    LOG = logging.getLogger("Configuration")
 
     def __init__(self):
         self.data_directory = None
@@ -25,7 +24,6 @@ class Configuration(object):
         self.image_prefix = 'crs'
         self.log_dockerfile = False
         self.log_docker_cmd_output = False
-        self.dockerfile_print_color = Color.Red
 
     def prepare(self):
         global _config_instance

@@ -1,15 +1,14 @@
+import logging
 import os
 import urllib.parse
+from collections import defaultdict
+from typing import Union, List, Dict
 
 import docker
 import docker.errors
-from typing import Union, List, Dict
-
-from collections import defaultdict
-
 import jinja2
 
-from ambari_docker.utils import TempDirectory, copy_tree, ProcessRunner, download_file, copy_file, DummyLogger
+from ambari_docker.utils import TempDirectory, copy_tree, ProcessRunner, download_file, copy_file
 
 docker_client = docker.from_env()
 
@@ -35,16 +34,18 @@ _check_equality_labels = ('ambari.repo', 'ambari.build', 'ambari.os')
 # this labels in base image must be missing or false in base image
 _check_false_labels = ('ambari.server', 'ambari.agent')
 
+LOG = logging.getLogger("DockerImageBuilder")
 
-def _get_base_image_info(base_image_name, repo_os, existing_labels=None, logger=DummyLogger()):
+
+def _get_base_image_info(base_image_name, repo_os, existing_labels=None):
     if not base_image_name:
         base_image_name = _os_to_image[repo_os]
     try:
         base_image = docker_client.images.get(base_image_name)
     except docker.errors.ImageNotFound:
-        logger.info(f"Pulling base image '{base_image_name}'...")
+        LOG.info(f"Pulling base image '{base_image_name}'...")
         base_image = docker_client.images.pull(base_image_name)
-        logger.info(f"Pulled base image '{base_image_name}'")
+        LOG.info(f"Pulled base image '{base_image_name}'")
 
     if not existing_labels:
         existing_labels = {}
@@ -82,14 +83,14 @@ class ContextFile(object):
         self.destination = destination
         self.destination_folder = os.path.dirname(self.destination).lstrip("/")
 
-    def copy_to_context(self, context_directory: str, logger=DummyLogger()):
+    def copy_to_context(self, context_directory: str):
         context_destination_directory = os.path.join(context_directory, self.destination_folder)
         os.makedirs(context_destination_directory)
         context_file_destination = os.path.join(context_directory, self.destination.lstrip("/"))
         if "http" in self.source:
-            logger.info(f"Trying to download '{self.source}' to '{context_file_destination}'")
+            LOG.info(f"Trying to download '{self.source}' to '{context_file_destination}'")
             download_file(self.source, context_file_destination)
-            logger.info(f"Downloaded '{self.source}' to '{context_file_destination}'")
+            LOG.info(f"Downloaded '{self.source}' to '{context_file_destination}'")
         else:
             if os.path.exists(self.source):
                 copy_file(self.source, context_file_destination)
@@ -102,22 +103,16 @@ class ContextDirectory(object):
         self.source = source
         self.destination = destination.lstrip("/")
 
-    def copy_to_context(self, context_directory: str, logger=DummyLogger()):
+    def copy_to_context(self, context_directory: str):
         context_destination_path = os.path.join(context_directory, self.destination)
-        logger.info(f"Copying folder '{self.source}' to '{context_destination_path}'")
+        LOG.info(f"Copying folder '{self.source}' to '{context_destination_path}'")
         copy_tree(self.source, context_destination_path)
 
 
-# TODO remove logger, verbosity, print_f, process_runner_args
-# TODO add "preserve_context" for debugging purposes
 def build_docker_image(
         image_tag: str,
         docker_file_content: str,
-        context_data: List[Union[ContextFile, ContextDirectory]] = (),
-        logger=DummyLogger(),
-        verbosity=0,
-        print_f=print,
-        process_runner_args: Dict = None
+        context_data: List[Union[ContextFile, ContextDirectory]] = ()
 ):
     """
     Builds docker image with tag *image_tag*.
@@ -129,33 +124,28 @@ def build_docker_image(
     We need this kind of hacks in order to make relative path for commands like "COPY" in Dockerfiles work properly.
     """
 
-    if process_runner_args is None:
-        process_runner_args = {}
-
     with TempDirectory() as tmp_dir:
-        logger.info(
+        LOG.info(
             f"Building docker image '{image_tag}' with context directory '{tmp_dir.path}'...")
 
         for data in context_data:
             data.copy_to_context(tmp_dir.path)
 
-        if verbosity > 1:
-            logger.debug("dockerfile content:")
-            print_f(docker_file_content)
+        LOG.debug("dockerfile content:")
+        for line in docker_file_content.splitlines():
+            LOG.debug(line.rstrip())
 
         dockerfile_path = os.path.join(tmp_dir.path, "Dockerfile")
         open(dockerfile_path, "w").write(docker_file_content)
 
         out, code = ProcessRunner(
             f'docker build -t {image_tag} -f Dockerfile .',
-            cwd=tmp_dir.path,
-            silent=verbosity < 2,
-            **process_runner_args
+            cwd=tmp_dir.path
         ).communicate()
         if code != 0:
-            logger.error(f"Failed to build image '{image_tag}'")
+            LOG.error(f"Failed to build image '{image_tag}'")
             raise Exception(f"Failed to build image '{image_tag}'")
-        logger.info(f"Successfully build image '{image_tag}'")
+        LOG.info(f"Successfully build image '{image_tag}'")
 
 
 # def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs) -> str:
@@ -200,8 +190,6 @@ def _build_ambari_image(
         context_data=None,
         j2_env: jinja2.Environment = None,
         image_prefix="crs",
-        logger=DummyLogger(),
-        verbosity=0,
         **template_arguments
 ):
     """
@@ -242,7 +230,7 @@ def _build_ambari_image(
     labels['ambari.os'] = repo_os
     labels[f'ambari.{component}'] = "true"
 
-    base_image_name, labels = _get_base_image_info(base_image_name, repo_os, labels, logger=logger)
+    base_image_name, labels = _get_base_image_info(base_image_name, repo_os, labels)
 
     # some os requires additional packages
     packages = packages + _os_to_packages[repo_os]
@@ -269,9 +257,7 @@ def _build_ambari_image(
     build_docker_image(
         image_tag=resulting_image_tag,
         docker_file_content=dockerfile_content,
-        context_data=context_data,
-        logger=logger,
-        verbosity=verbosity
+        context_data=context_data
     )
 
     return resulting_image_tag
@@ -281,9 +267,7 @@ def build_ambari_server_image(
         ambari_repo_url: str,
         base_image_name: str = None,
         mpacks=None,
-        j2_env: jinja2.Environment = None,
-        logger=DummyLogger(),
-        verbosity=0
+        j2_env: jinja2.Environment = None
 ):
     if mpacks is None:
         mpacks = []
@@ -310,9 +294,7 @@ def build_ambari_server_image(
         "server",
         packages=packages,
         context_data=context_data,
-        logger=logger,
         j2_env=j2_env,
-        verbosity=verbosity,
         **template_arguments
     )
 
@@ -321,7 +303,6 @@ def build_ambari_agent_image(
         ambari_repo_url: str,
         base_image_name: str = None,
         j2_env: jinja2.Environment = None,
-        logger=DummyLogger(),
         verbosity=0
 ):
     return _build_ambari_image(
@@ -330,6 +311,5 @@ def build_ambari_agent_image(
         "agent",
         packages=("ambari-agent",),
         j2_env=j2_env,
-        logger=logger,
         verbosity=verbosity
     )
