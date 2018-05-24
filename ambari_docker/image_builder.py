@@ -3,9 +3,13 @@ import urllib.parse
 
 import docker
 import docker.errors
+from typing import Union, List, Dict
 
-from ambari_docker.config import instance
-from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color, download_file, copy_file
+from collections import defaultdict
+
+import jinja2
+
+from ambari_docker.utils import TempDirectory, copy_tree, ProcessRunner, download_file, copy_file, DummyLogger
 
 docker_client = docker.from_env()
 
@@ -19,37 +23,100 @@ _os_to_template_path = {
     'amazonlinux2': 'centos7_amazonlinux2'
 }
 
-_os_to_packages = {
-    'amazonlinux2': ('tar', 'initscripts')
-}
+_os_to_packages = defaultdict(
+    lambda: (),
+    {
+        'amazonlinux2': ('tar', 'initscripts')
+    }
+)
+
+# this labels must be equal for new image and base image if exists in base image
+_check_equality_labels = ('ambari.repo', 'ambari.build', 'ambari.os')
+# this labels in base image must be missing or false in base image
+_check_false_labels = ('ambari.server', 'ambari.agent')
 
 
-def _get_base_image_info(base_image_name, repo_os):
+def _get_base_image_info(base_image_name, repo_os, existing_labels=None, logger=DummyLogger()):
     if not base_image_name:
         base_image_name = _os_to_image[repo_os]
     try:
         base_image = docker_client.images.get(base_image_name)
     except docker.errors.ImageNotFound:
-        instance().IMAGE_BUILDER_LOG.info(f"Trying to pull base image '{base_image_name}'")
+        logger.info(f"Pulling base image '{base_image_name}'...")
         base_image = docker_client.images.pull(base_image_name)
+        logger.info(f"Pulled base image '{base_image_name}'")
 
-    labels = {}
+    if not existing_labels:
+        existing_labels = {}
+
+    base_image_labels = {}
+
     for key, value in base_image.labels.items():
         if key.startswith("ambari."):
-            labels[key] = value
+            base_image_labels[key] = value
         if key.startswith("hdf."):
-            labels[key] = value
+            base_image_labels[key] = value
         if key.startswith("hdp."):
-            labels[key] = value
+            base_image_labels[key] = value
 
-    if 'ambari.os' in labels:
-        if labels['ambari.os'] != repo_os:
-            raise Exception(f"Base image os('{base_image.labels['os']}') is not a repo os '{os}'")
+    for label_key in _check_equality_labels:
+        if label_key in base_image_labels:
+            if label_key in existing_labels:
+                if base_image_labels[label_key] != existing_labels[label_key]:
+                    raise Exception(f"'{existing_labels}' has value '{base_image_labels[label_key]}',"
+                                    f" but wanted {existing_labels[label_key]}")
 
-    return base_image_name, labels
+    for label_key in _check_false_labels:
+        if label_key in existing_labels:
+            if label_key in base_image_labels and base_image_labels[label_key] == "true":
+                raise Exception(f"'{existing_labels}' already presented in image {base_image_name}")
+
+    base_image_labels.update(existing_labels)
+
+    return base_image_name, base_image_labels
 
 
-def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_name, additional_files):
+class ContextFile(object):
+    def __init__(self, source, destination):
+        self.source = source
+        self.destination = destination
+        self.destination_folder = os.path.dirname(self.destination).lstrip("/")
+
+    def copy_to_context(self, context_directory: str, logger=DummyLogger()):
+        context_destination_directory = os.path.join(context_directory, self.destination_folder)
+        os.makedirs(context_destination_directory)
+        context_file_destination = os.path.join(context_directory, self.destination.lstrip("/"))
+        if "http" in self.source:
+            logger.info(f"Trying to download '{self.source}' to '{context_file_destination}'")
+            download_file(self.source, context_file_destination)
+            logger.info(f"Downloaded '{self.source}' to '{context_file_destination}'")
+        else:
+            if os.path.exists(self.source):
+                copy_file(self.source, context_file_destination)
+            else:
+                raise Exception(f"Source file '{self.source}' does not exists")
+
+
+class ContextDirectory(object):
+    def __init__(self, source, destination="/"):
+        self.source = source
+        self.destination = destination.lstrip("/")
+
+    def copy_to_context(self, context_directory: str, logger=DummyLogger()):
+        context_destination_path = os.path.join(context_directory, self.destination)
+        logger.info(f"Copying folder '{self.source}' to '{context_destination_path}'")
+        copy_tree(self.source, context_destination_path)
+
+
+def build_docker_image(
+        image_tag: str,
+        docker_file_content: str,
+        context_data: List[Union[ContextFile, ContextDirectory]] = (),
+        logger=DummyLogger(),
+        verbosity=0,
+        print_f=print,
+        process_runner_args: Dict = None
+):
     """
     Builds docker image with tag *image_tag*.
 
@@ -58,95 +125,82 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
     were copied. "docker build" command will be executed in newly created temporary folder.
 
     We need this kind of hacks in order to make relative path for commands like "COPY" in Dockerfiles work properly.
-
-    :param image_tag:
-    :param base_dir:
-    :param docker_file_content:
-    :param docker_file_name:
-    :param additional_files: additional files that will be copied to build context
-    :return:
     """
+
+    if process_runner_args is None:
+        process_runner_args = {}
+
     with TempDirectory() as tmp_dir:
-        instance().IMAGE_BUILDER_LOG.info(
+        logger.info(
             f"Building docker image '{image_tag}' with context directory '{tmp_dir.path}'...")
 
-        for file_destination, source_descriptor in additional_files.items():
-            source_type, source = source_descriptor
-            dest_dir = os.path.join(tmp_dir.path, os.path.dirname(file_destination).lstrip("/"))
-            os.makedirs(dest_dir)
-            dest_path = os.path.join(tmp_dir.path, file_destination.lstrip("/"))
-            if "http" in source:
-                if source_type != "file":
-                    raise Exception(f"Source type '{source}' is not compatible with web links")
-                instance().IMAGE_BUILDER_LOG.info(f"Trying to download '{source}' to '{dest_path}'")
-                download_file(source, dest_path)
-                instance().IMAGE_BUILDER_LOG.info(f"Downloaded '{source}' to '{dest_path}'")
-            else:
-                if os.path.exists(source):
-                    copy_file(source, dest_path)
-                else:
-                    raise Exception(f"Source file '{source}' does not exists")
-            # TODO ssh files support, directory support
-        if instance().log_dockerfile:
-            instance().IMAGE_BUILDER_LOG.debug("dockerfile content:")
-            print(instance().dockerfile_print_color.colorize(docker_file_content))
-        copytree(base_dir, tmp_dir.path)
-        dest_dockerfile = os.path.join(tmp_dir.path, docker_file_name)
-        open(dest_dockerfile, "w").write(docker_file_content)
+        for data in context_data:
+            data.copy_to_context(tmp_dir.path)
+
+        if verbosity > 1:
+            logger.debug("dockerfile content:")
+            print_f(docker_file_content)
+
+        dockerfile_path = os.path.join(tmp_dir.path, "Dockerfile")
+        open(dockerfile_path, "w").write(docker_file_content)
 
         out, code = ProcessRunner(
-            f'docker build -t {image_tag} -f {docker_file_name} .',
+            f'docker build -t {image_tag} -f Dockerfile .',
             cwd=tmp_dir.path,
-            text_color=Color.Cyan,
-            prepend_color=Color.Blue,
-            silent=not instance().log_docker_cmd_output
+            silent=verbosity < 2,
+            **process_runner_args
         ).communicate()
         if code != 0:
-            raise Exception(f"Failed to build image {image_tag}")
-        instance().IMAGE_BUILDER_LOG.info(f"Successfully build image '{image_tag}'")
+            logger.error(f"Failed to build image '{image_tag}'")
+            raise Exception(f"Failed to build image '{image_tag}'")
+        logger.info(f"Successfully build image '{image_tag}'")
 
 
-def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs) -> str:
-    url = urllib.parse.urlparse(stack_repo_url)
-    path_parts = url.path.split('/')
-
-    repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
-    repo_file_url = f"{stack_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
-    repo_name = f"{repo_stack}-{repo_build}"
-    resulting_image_tag = f"{config.image_prefix}/{repo_stack.lower()}:{repo_build}"
-    base_image_name, labels = _get_base_image_info(base_image_name, repo_os)
-
-    labels[f"{repo_stack.lower()}.repo"] = stack_repo_url
-    labels[f"{repo_stack.lower()}.build"] = repo_name
-    labels['ambari.os'] = repo_os
-
-    if labels:
-        kwargs['label'] = " ".join([f'{k}="{v}"' for k, v in labels.items()])
-
-    template = instance().jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
-    template_directory = os.path.dirname(os.path.abspath(template.filename))
-
-    dockerfile_content = template.render(
-        repo_file_url=repo_file_url,
-        repo_name=repo_name,
-        base_image=base_image_name,
-        **kwargs
-    )
-
-    _build_docker_image(resulting_image_tag, template_directory, dockerfile_content, "Dockerfile")
-
-    return resulting_image_tag
+# def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs) -> str:
+#     url = urllib.parse.urlparse(stack_repo_url)
+#     path_parts = url.path.split('/')
+#
+#     repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
+#     repo_file_url = f"{stack_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
+#     repo_name = f"{repo_stack}-{repo_build}"
+#     resulting_image_tag = f"{config.image_prefix}/{repo_stack.lower()}:{repo_build}"
+#     base_image_name, labels = _get_base_image_info(base_image_name, repo_os)
+#
+#     labels[f"{repo_stack.lower()}.repo"] = stack_repo_url
+#     labels[f"{repo_stack.lower()}.build"] = repo_name
+#     labels['ambari.os'] = repo_os
+#
+#     if labels:
+#         kwargs['label'] = " ".join([f'{k}="{v}"' for k, v in labels.items()])
+#
+#     template = instance().jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
+#     template_directory = os.path.dirname(os.path.abspath(template.filename))
+#
+#     dockerfile_content = template.render(
+#         repo_file_url=repo_file_url,
+#         repo_name=repo_name,
+#         base_image=base_image_name,
+#         **kwargs
+#     )
+#
+#     build_docker_image(resulting_image_tag, template_directory, dockerfile_content, "Dockerfile")
+#
+#     return resulting_image_tag
 
 
 def _build_ambari_image(
         ambari_repo_url: str,
         base_image_name: str = None,
         component: str = "server",
-        additional_labels=None,
-        env_variables=None,
+        labels=None,
+        env=None,
         packages=(),
-        additional_files=None,
-        **kwargs
+        context_data=None,
+        j2_env: jinja2.Environment = None,
+        image_prefix="crs",
+        logger=DummyLogger(),
+        verbosity=0,
+        **template_arguments
 ):
     """
     Builds image with ambari packages installed.
@@ -155,21 +209,22 @@ def _build_ambari_image(
     :param ambari_repo_url: ambari repository url
     :param base_image_name: base image for resulting image
     :param component: component name, can be 'server' or 'agent'
-    :param additional_labels: additional labels to be added to resulting image
+    :param labels: additional labels to be added to resulting image
     :param env_variables: environment variables to be set
     :param packages: packages to be installed in to image, can not be empty
-    :param kwargs: key-value arguments that will be passed to Dockerfile template
+    :param template_arguments: key-value arguments that will be passed to Dockerfile template
 
     :return: resulting image tag
     """
 
-    if additional_files is None:
-        additional_files = {}
+    if context_data is None:
+        context_data = []
 
-    if additional_labels is None:
-        additional_labels = {}
-    if env_variables is None:
-        env_variables = {}
+    if labels is None:
+        labels = {}
+
+    if env is None:
+        env = {}
     if not packages:
         raise Exception("Some ambari packages need to be specified")
 
@@ -178,52 +233,44 @@ def _build_ambari_image(
 
     repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
     repo_file_url = f"{ambari_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
-    base_image_name, labels = _get_base_image_info(base_image_name, repo_os)
 
-    if 'ambari.repo' in labels and labels['ambari.repo'] != ambari_repo_url:
-        raise Exception(f"Base image already have repo '{ambari_repo_url}'")
-    else:
-        labels['ambari.repo'] = ambari_repo_url
-    if 'ambari.build' in labels and labels['ambari.build'] != repo_build:
-        raise Exception(f"Base image already have repo build '{repo_build}'")
-    else:
-        labels['ambari.build'] = repo_build
-
+    # create labels
+    labels['ambari.repo'] = ambari_repo_url
+    labels['ambari.build'] = repo_build
     labels['ambari.os'] = repo_os
+    labels[f'ambari.{component}'] = "true"
 
-    if f'ambari.{component}' in labels and labels[f'ambari.{component}'] == "true":
-        raise Exception(f"Base image already have ambari-{component}")
-    else:
-        labels[f'ambari.{component}'] = "true"
+    base_image_name, labels = _get_base_image_info(base_image_name, repo_os, labels, logger=logger)
 
-    for label_key, label_value in additional_labels.items():
-        if label_key in labels and labels[label_key] != label_value:
-            raise Exception(f"Base image already have label '{label_key}=\"{labels[label_key]}\"'")
-        else:
-            labels[label_key] = label_value
+    # some os requires additional packages
+    packages = packages + _os_to_packages[repo_os]
 
     if labels:
-        kwargs['label'] = " ".join([f'{k}="{v}"' for k, v in labels.items()])
+        template_arguments['label'] = " ".join([f'{k}="{v}"' for k, v in labels.items()])
 
-    if env_variables:
-        kwargs['environment'] = " ".join([f'{k}="{v}"' for k, v in env_variables.items()])
+    if env:
+        template_arguments['environment'] = " ".join([f'{k}="{v}"' for k, v in env.items()])
 
-    if repo_os in _os_to_packages:
-        packages = packages + _os_to_packages[repo_os]
+    template_arguments['packages'] = packages
+    template_arguments['base_image'] = base_image_name
+    template_arguments['repo_file_url'] = repo_file_url
 
-    template = instance().jinja_env.get_template(
+    template = j2_env.get_template(
         f"dockerfiles/ambari/{_os_to_template_path[repo_os]}/Dockerfile.{component}")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
-    dockerfile_content = template.render(
-        repo_file_url=repo_file_url,
-        base_image=base_image_name,
-        packages=packages,
-        **kwargs
-    )
-    resulting_image_tag = f"{instance().image_prefix}/ambari/{component}:{repo_build}"
+    context_data.append(ContextDirectory(template_directory))
 
-    _build_docker_image(resulting_image_tag, template_directory, dockerfile_content, f"Dockerfile.{component}",
-                        additional_files)
+    dockerfile_content = template.render(**template_arguments)
+
+    resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
+
+    build_docker_image(
+        image_tag=resulting_image_tag,
+        docker_file_content=dockerfile_content,
+        context_data=context_data,
+        logger=logger,
+        verbosity=verbosity
+    )
 
     return resulting_image_tag
 
@@ -231,45 +278,56 @@ def _build_ambari_image(
 def build_ambari_server_image(
         ambari_repo_url: str,
         base_image_name: str = None,
-        install_agent: bool = True,
-        mpacks=None
+        mpacks=None,
+        j2_env: jinja2.Environment = None,
+        logger=DummyLogger(),
+        verbosity=0
 ):
     if mpacks is None:
         mpacks = []
 
-    kwargs = {}
+    template_arguments = {}
 
-    additional_files = {}
-    mpacks_paths = []
+    context_data = []
+    mpacks_in_container = []
 
     for mpack in mpacks:
         mpack_name = os.path.basename(mpack)
         mpack_path = f"/mpacks/{mpack_name}"
-        additional_files[mpack_path] = ("file", mpack)
-        mpacks_paths.append(f"/root/mpacks/{mpack_name}")
+        context_data.append(ContextFile(mpack, mpack_path))
+        mpacks_in_container.append(f"/root/mpacks/{mpack_name}")
 
-    if mpacks_paths:
-        kwargs["mpacks"] = mpacks_paths
+    if mpacks_in_container:
+        template_arguments["mpacks"] = mpacks_in_container
 
-    add_labels = {"ambari.agent": "true"} if install_agent else {}
-    packages = ("ambari-server", "ambari-agent") if install_agent else ("ambari-server",)
+    packages = ("ambari-server",)
 
     return _build_ambari_image(
         ambari_repo_url,
         base_image_name,
         "server",
-        additional_labels=add_labels,
-        install_agent=install_agent,
         packages=packages,
-        additional_files=additional_files,
-        **kwargs
+        context_data=context_data,
+        logger=logger,
+        j2_env=j2_env,
+        verbosity=verbosity,
+        **template_arguments
     )
 
 
-def build_ambari_agent_image(ambari_repo_url: str, base_image_name: str = None):
+def build_ambari_agent_image(
+        ambari_repo_url: str,
+        base_image_name: str = None,
+        j2_env: jinja2.Environment = None,
+        logger=DummyLogger(),
+        verbosity=0
+):
     return _build_ambari_image(
         ambari_repo_url,
         base_image_name,
         "agent",
-        packages=("ambari-agent",)
+        packages=("ambari-agent",),
+        j2_env=j2_env,
+        logger=logger,
+        verbosity=verbosity
     )

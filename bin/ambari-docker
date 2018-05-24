@@ -2,7 +2,7 @@
 import click
 import typing
 
-from ambari_docker.config import instance, Configuration
+from ambari_docker.config import Configuration
 from ambari_docker.image_builder import build_ambari_agent_image, build_ambari_server_image
 from ambari_docker.utils import StdoutLogger
 
@@ -126,11 +126,14 @@ def cli():
 
 @cli.resultcallback()
 def process_pipeline(processors):
-    previous_command_context = None
     with Configuration() as config:
+        previous_command_context = {
+            "j2_env": config.jinja_env
+        }
         for pipeline_command in sorted(processors, key=lambda x: x.order):
             previous_command_context = pipeline_command.callback(context=previous_command_context,
                                                                  **pipeline_command.args)
+            previous_command_context['j2_env'] = config.jinja_env
 
 
 @cli.command(short_help=IMAGE_SHORT_HELP)
@@ -154,16 +157,11 @@ def image(**kwargs):
             mpack: typing.List[str],
             verbose: int
     ):
-        if verbose == 1:
-            instance().log_docker_cmd_output = True
-
-        if verbose >= 2:
-            instance().log_dockerfile = True
-            instance().log_docker_cmd_output = True
-
-        agent_image = build_ambari_agent_image(repository, agent_base_image)
+        agent_image = build_ambari_agent_image(repository, agent_base_image, j2_env=context['j2_env'], logger=LOG,
+                                               verbosity=verbose)
         server_base_image = agent_image if include_agent else server_base_image
-        server_image = build_ambari_server_image(repository, server_base_image, mpacks=mpack)
+        server_image = build_ambari_server_image(repository, server_base_image, mpacks=mpack, j2_env=context['j2_env'],
+                                                 logger=LOG, verbosity=verbose)
 
         LOG.info(f"Resulting agent image :{agent_image}")
         LOG.info(f"Resulting server image:{server_image}")
@@ -212,7 +210,7 @@ def compose(**kwargs):
         if agent_image is None or server_image is None:
             click.get_current_context().fail("'--server-image' and '--agent-image' must be specified")
 
-        compose_template = instance().jinja_env.get_template("docker-compose.yml")
+        compose_template = context['j2_env'].get_template("docker-compose.yml")
         nodes = []
         for i in range(int(node_count)):
             nodes.append(node_template.format(number=i))

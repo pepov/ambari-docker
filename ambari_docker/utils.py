@@ -15,7 +15,7 @@ import pkg_resources
 import requests
 
 
-def copytree(src, dst, symlinks=False, ignore=None):
+def copy_tree(src, dst, symlinks=False, ignore=None):
     for item in os.listdir(src):
         s = os.path.join(src, item)
         d = os.path.join(dst, item)
@@ -26,7 +26,10 @@ def copytree(src, dst, symlinks=False, ignore=None):
 
 
 def copy_file(src, dst):
-    shutil.copy(src, dst)
+    if os.path.isfile(src):
+        shutil.copy(src, dst)
+    else:
+        raise ValueError(f"'{src}' is not a file")
 
 
 def download_file(url, destination):
@@ -129,7 +132,7 @@ class Color(enum.Enum):
     On_ICyan = '\033[0;106m'  # Cyan
     On_IWhite = '\033[0;107m'  # White
 
-    NoColor = None
+    NoColor = ""
 
     def __init__(self, color_code):
         self.color_code = color_code
@@ -232,6 +235,18 @@ class StdoutLogger(object):
     def debug(self, message):
         _time = time.strftime("%Y-%m-%d %H:%M:%S")
         sys.stdout.write(self.format.format(asctime=_time, levelname="DEBUG", message=message))
+
+
+class DummyLogger(object):
+
+    def info(self, message):
+        pass
+
+    def debug(self, message):
+        pass
+
+    def error(self, message):
+        pass
 
 
 class WithDataFiles(object):

@@ -8,14 +8,6 @@ from jinja2 import Environment, FileSystemLoader
 
 from ambari_docker.utils import Color, StdoutLogger
 
-_config_instance = None
-
-
-def instance() -> 'Configuration':
-    if _config_instance is None:
-        raise Exception("No config instance available")
-    return _config_instance
-
 
 class RelEnvironment(Environment):
     """Override join_path() to enable relative template paths."""
@@ -34,7 +26,6 @@ class Configuration(object):
         self.log_dockerfile = False
         self.log_docker_cmd_output = False
         self.dockerfile_print_color = Color.Red
-        self.IMAGE_BUILDER_LOG = StdoutLogger()
 
     def prepare(self):
         global _config_instance
@@ -56,11 +47,11 @@ class Configuration(object):
             shutil.rmtree(self.data_directory, ignore_errors=True)
         except:
             pass
+        self.LOG.info(f"Cleared data files directory {self.data_directory}")
         self.data_directory = None
         self.jinja_env = None
         global _config_instance
         _config_instance = None
-        self.LOG.info(f"Cleared data files directory {self.data_directory}")
 
     def __enter__(self):
         self.prepare()
