@@ -1,4 +1,4 @@
-{%- macro systemd(name, image, suffix, domain, server_hostname) %}
+{%- macro systemd(name, image, suffix, domain, server_hostname, memory) %}
   {{- name }}:
     image: "{{ image }}"
     container_name: "{{ name }}.{{ suffix }}"
@@ -10,5 +10,5 @@
     cap_add:
      - SYS_ADMIN
      - SYS_RESOURCE
-    mem_limit: 2G
+    mem_limit: {{ memory }}
 {%- endmacro %}

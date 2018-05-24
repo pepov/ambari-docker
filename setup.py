@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from setuptools import setup
+from setuptools import setup, find_packages
 import os
 
 
@@ -21,9 +21,9 @@ setup(
     description='Helper scripts to pack ambari to usable Docker images',
     author='Eugene Chekanskiy',
     author_email='echekanskiy@gmail.com',
-    packages=['ambari_docker'],
+    packages=find_packages(),
     zip_safe=False,
     data_files=get_data_files(),
-    install_requires=['docker', 'jinja2'],
-    scripts=['bin/docker-ambari-image', 'bin/docker-ambari-compose'],
+    install_requires=['docker', 'jinja2', 'click', 'requests'],
+    scripts=['bin/ambari-docker'],
 )
