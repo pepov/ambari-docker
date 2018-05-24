@@ -2,18 +2,18 @@
 
 from setuptools import setup, find_packages
 import os
+import zipfile
 
 
-def get_data_files():
-    results = {}
-    for dirpath, dirnames, filenames in os.walk('templates'):
-        for file in filenames:
-            file_path = os.path.join(dirpath, file)
-            if dirpath not in results:
-                results[dirpath] = []
-            results[dirpath].append(file_path)
-    return results.items()
+def zip_dir(path, destination):
+    zipf = zipfile.ZipFile(destination, 'w', zipfile.ZIP_STORED)
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            zipf.write(os.path.join(root, file))
+    zipf.close()
 
+
+zip_dir(os.path.join(os.path.dirname(__file__), 'templates'), "ambari_docker/data.zip")
 
 setup(
     name='ambari-docker-utils',
@@ -23,7 +23,7 @@ setup(
     author_email='echekanskiy@gmail.com',
     packages=find_packages(),
     zip_safe=False,
-    data_files=get_data_files(),
+    package_data={"ambari_docker": ["data.zip"]},
     install_requires=['docker', 'jinja2', 'click', 'requests'],
     scripts=['bin/ambari-docker'],
 )

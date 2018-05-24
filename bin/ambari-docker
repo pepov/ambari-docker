@@ -2,7 +2,7 @@
 import click
 import typing
 
-from ambari_docker import config
+from ambari_docker.config import instance, Configuration
 from ambari_docker.image_builder import build_ambari_agent_image, build_ambari_server_image
 from ambari_docker.utils import StdoutLogger
 
@@ -127,9 +127,10 @@ def cli():
 @cli.resultcallback()
 def process_pipeline(processors):
     previous_command_context = None
-    for pipeline_command in sorted(processors, key=lambda x: x.order):
-        previous_command_context = pipeline_command.callback(context=previous_command_context,
-                                                             **pipeline_command.args)
+    with Configuration() as config:
+        for pipeline_command in sorted(processors, key=lambda x: x.order):
+            previous_command_context = pipeline_command.callback(context=previous_command_context,
+                                                                 **pipeline_command.args)
 
 
 @cli.command(short_help=IMAGE_SHORT_HELP)
@@ -154,11 +155,11 @@ def image(**kwargs):
             verbose: int
     ):
         if verbose == 1:
-            config.log_docker_cmd_output = True
+            instance().log_docker_cmd_output = True
 
         if verbose >= 2:
-            config.log_dockerfile = True
-            config.log_docker_cmd_output = True
+            instance().log_dockerfile = True
+            instance().log_docker_cmd_output = True
 
         agent_image = build_ambari_agent_image(repository, agent_base_image)
         server_base_image = agent_image if include_agent else server_base_image
@@ -211,7 +212,7 @@ def compose(**kwargs):
         if agent_image is None or server_image is None:
             click.get_current_context().fail("'--server-image' and '--agent-image' must be specified")
 
-        compose_template = config.jinja_env.get_template("docker-compose.yml")
+        compose_template = instance().jinja_env.get_template("docker-compose.yml")
         nodes = []
         for i in range(int(node_count)):
             nodes.append(node_template.format(number=i))

@@ -4,7 +4,7 @@ import urllib.parse
 import docker
 import docker.errors
 
-from ambari_docker import config
+from ambari_docker.config import instance
 from ambari_docker.utils import TempDirectory, copytree, ProcessRunner, Color, download_file, copy_file
 
 docker_client = docker.from_env()
@@ -23,8 +23,6 @@ _os_to_packages = {
     'amazonlinux2': ('tar', 'initscripts')
 }
 
-LOG = config.IMAGE_BUILDER_LOG
-
 
 def _get_base_image_info(base_image_name, repo_os):
     if not base_image_name:
@@ -32,7 +30,7 @@ def _get_base_image_info(base_image_name, repo_os):
     try:
         base_image = docker_client.images.get(base_image_name)
     except docker.errors.ImageNotFound:
-        LOG.info(f"Trying to pull base image '{base_image_name}'")
+        instance().IMAGE_BUILDER_LOG.info(f"Trying to pull base image '{base_image_name}'")
         base_image = docker_client.images.pull(base_image_name)
 
     labels = {}
@@ -69,7 +67,8 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
     :return:
     """
     with TempDirectory() as tmp_dir:
-        LOG.info(f"Building docker image '{image_tag}' with context directory '{tmp_dir.path}'...")
+        instance().IMAGE_BUILDER_LOG.info(
+            f"Building docker image '{image_tag}' with context directory '{tmp_dir.path}'...")
 
         for file_destination, source_descriptor in additional_files.items():
             source_type, source = source_descriptor
@@ -79,18 +78,18 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
             if "http" in source:
                 if source_type != "file":
                     raise Exception(f"Source type '{source}' is not compatible with web links")
-                LOG.info(f"Trying to download '{source}' to '{dest_path}'")
+                instance().IMAGE_BUILDER_LOG.info(f"Trying to download '{source}' to '{dest_path}'")
                 download_file(source, dest_path)
-                LOG.info(f"Downloaded '{source}' to '{dest_path}'")
+                instance().IMAGE_BUILDER_LOG.info(f"Downloaded '{source}' to '{dest_path}'")
             else:
                 if os.path.exists(source):
                     copy_file(source, dest_path)
                 else:
                     raise Exception(f"Source file '{source}' does not exists")
             # TODO ssh files support, directory support
-        if config.log_dockerfile:
-            LOG.debug("dockerfile content:")
-            print(config.dockerfile_print_color.colorize(docker_file_content))
+        if instance().log_dockerfile:
+            instance().IMAGE_BUILDER_LOG.debug("dockerfile content:")
+            print(instance().dockerfile_print_color.colorize(docker_file_content))
         copytree(base_dir, tmp_dir.path)
         dest_dockerfile = os.path.join(tmp_dir.path, docker_file_name)
         open(dest_dockerfile, "w").write(docker_file_content)
@@ -100,11 +99,11 @@ def _build_docker_image(image_tag, base_dir, docker_file_content, docker_file_na
             cwd=tmp_dir.path,
             text_color=Color.Cyan,
             prepend_color=Color.Blue,
-            silent=not config.log_docker_cmd_output
+            silent=not instance().log_docker_cmd_output
         ).communicate()
         if code != 0:
             raise Exception(f"Failed to build image {image_tag}")
-        LOG.info(f"Successfully build image '{image_tag}'")
+        instance().IMAGE_BUILDER_LOG.info(f"Successfully build image '{image_tag}'")
 
 
 def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs) -> str:
@@ -124,7 +123,7 @@ def build_stack_image(stack_repo_url: str, base_image_name: str = None, **kwargs
     if labels:
         kwargs['label'] = " ".join([f'{k}="{v}"' for k, v in labels.items()])
 
-    template = config.jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
+    template = instance().jinja_env.get_template(f"dockerfiles/stack/{repo_os}/Dockerfile")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
 
     dockerfile_content = template.render(
@@ -212,7 +211,7 @@ def _build_ambari_image(
     if repo_os in _os_to_packages:
         packages = packages + _os_to_packages[repo_os]
 
-    template = config.jinja_env.get_template(
+    template = instance().jinja_env.get_template(
         f"dockerfiles/ambari/{_os_to_template_path[repo_os]}/Dockerfile.{component}")
     template_directory = os.path.dirname(os.path.abspath(template.filename))
     dockerfile_content = template.render(
@@ -221,7 +220,7 @@ def _build_ambari_image(
         packages=packages,
         **kwargs
     )
-    resulting_image_tag = f"{config.image_prefix}/ambari/{component}:{repo_build}"
+    resulting_image_tag = f"{instance().image_prefix}/ambari/{component}:{repo_build}"
 
     _build_docker_image(resulting_image_tag, template_directory, dockerfile_content, f"Dockerfile.{component}",
                         additional_files)

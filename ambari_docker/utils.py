@@ -9,7 +9,9 @@ import sys
 import tempfile
 import time
 import uuid
+import zipfile
 
+import pkg_resources
 import requests
 
 
@@ -230,3 +232,29 @@ class StdoutLogger(object):
     def debug(self, message):
         _time = time.strftime("%Y-%m-%d %H:%M:%S")
         sys.stdout.write(self.format.format(asctime=_time, levelname="DEBUG", message=message))
+
+
+class WithDataFiles(object):
+    LOG = StdoutLogger()
+
+    def __init__(self, package, data_file):
+        self.package = package
+        self.data_file = data_file
+        self.directory = None
+
+    def __enter__(self):
+        self.directory = tempfile.mkdtemp()
+        stream = pkg_resources.resource_stream("ambari_docker", 'data.zip')
+        zip_ref = zipfile.ZipFile(stream, 'r')
+        zip_ref.extractall(self.directory)
+        zip_ref.close()
+        stream.close()
+        self.LOG.info(f"Extracted data files to {self.directory}")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            shutil.rmtree(self.directory, ignore_errors=True)
+        except:
+            pass
+        self.LOG.info(f"Cleared data files directory {self.directory}")
