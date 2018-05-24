@@ -133,6 +133,8 @@ def process_pipeline(processors):
         for pipeline_command in sorted(processors, key=lambda x: x.order):
             previous_command_context = pipeline_command.callback(context=previous_command_context,
                                                                  **pipeline_command.args)
+            if not previous_command_context:
+                previous_command_context = {}
             previous_command_context['j2_env'] = config.jinja_env
 
 
