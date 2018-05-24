@@ -143,7 +143,7 @@ class Color(enum.Enum):
         return text
 
 
-class ProcessRunner(object):
+class ProcessRunner(object):  # TODO remove this
     def __init__(
             self,
             command_line: str,
@@ -224,7 +224,7 @@ class ProcessRunner(object):
         return self.output.getvalue(), self.process.returncode
 
 
-class StdoutLogger(object):
+class StdoutLogger(object):  # TODO remove this, use regular logging
     def __init__(self, format: str = "{asctime} {levelname}:{message}\n"):
         self.format = format
 
@@ -237,7 +237,7 @@ class StdoutLogger(object):
         sys.stdout.write(self.format.format(asctime=_time, levelname="DEBUG", message=message))
 
 
-class DummyLogger(object):
+class DummyLogger(object):  # TODO remove this, use regular logging
 
     def info(self, message):
         pass
@@ -247,29 +247,3 @@ class DummyLogger(object):
 
     def error(self, message):
         pass
-
-
-class WithDataFiles(object):
-    LOG = StdoutLogger()
-
-    def __init__(self, package, data_file):
-        self.package = package
-        self.data_file = data_file
-        self.directory = None
-
-    def __enter__(self):
-        self.directory = tempfile.mkdtemp()
-        stream = pkg_resources.resource_stream("ambari_docker", 'data.zip')
-        zip_ref = zipfile.ZipFile(stream, 'r')
-        zip_ref.extractall(self.directory)
-        zip_ref.close()
-        stream.close()
-        self.LOG.info(f"Extracted data files to {self.directory}")
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        try:
-            shutil.rmtree(self.directory, ignore_errors=True)
-        except:
-            pass
-        self.LOG.info(f"Cleared data files directory {self.directory}")

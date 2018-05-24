@@ -2,9 +2,7 @@
 # install helper scripts
 COPY root /
 COPY root_server /
-{%- if install_agent %}
-COPY root_agent/ /
-{%- endif %}
+RUN chmod +x /usr/bin/systemctl /usr/bin/start-ambari-server
 # do initial setup
 RUN ambari-server setup -s
 {%- if mpacks is defined %}

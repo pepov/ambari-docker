@@ -108,6 +108,8 @@ class ContextDirectory(object):
         copy_tree(self.source, context_destination_path)
 
 
+# TODO remove logger, verbosity, print_f, process_runner_args
+# TODO add "preserve_context" for debugging purposes
 def build_docker_image(
         image_tag: str,
         docker_file_content: str,
