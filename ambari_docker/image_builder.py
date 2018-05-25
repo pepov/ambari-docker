@@ -86,7 +86,7 @@ class ContextFile(object):
 
     def copy_to_context(self, context_directory: str):
         context_destination_directory = os.path.join(context_directory, self.destination_folder)
-        os.makedirs(context_destination_directory)
+        os.makedirs(context_destination_directory, exist_ok=True)
         context_file_destination = os.path.join(context_directory, self.destination.lstrip("/"))
         if "http" in self.source:
             LOG.info(f"Trying to download '{self.source}' to '{context_file_destination}'")
