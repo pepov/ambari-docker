@@ -2,7 +2,9 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
 import uuid
 
 import requests
@@ -69,6 +71,34 @@ class ProcessRunner(object):
         data = ""
         while self.process.poll() is None:
             line = self.stream.readline().decode()
-            self.LOG.debug(line.rstrip())
+            if self.LOG.isEnabledFor(logging.DEBUG):
+                self.LOG.debug(line.rstrip())
             data += line
         return data, self.process.returncode
+
+
+class StdOutHandler(logging.Handler):
+    LOCK = threading.RLock()
+    TERMINATOR = "\n"
+
+    def createLock(self):
+        self.lock = self.LOCK
+
+    def flush(self):
+        self.acquire()
+        try:
+            sys.stdout.flush()
+        finally:
+            self.release()
+
+    def emit(self, record):
+        self.acquire()
+        try:
+            msg = self.format(record)
+            sys.stdout.write(msg)
+            sys.stdout.write(self.TERMINATOR)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+        finally:
+            self.release()

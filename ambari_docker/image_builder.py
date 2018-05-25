@@ -35,6 +35,7 @@ _check_equality_labels = ('ambari.repo', 'ambari.build', 'ambari.os')
 _check_false_labels = ('ambari.server', 'ambari.agent')
 
 LOG = logging.getLogger("DockerImageBuilder")
+DOCKERFILE_LOGGER = logging.getLogger("DockerfileLogger")
 
 
 def _get_base_image_info(base_image_name, repo_os, existing_labels=None):
@@ -131,15 +132,19 @@ def build_docker_image(
         for data in context_data:
             data.copy_to_context(tmp_dir.path)
 
-        LOG.debug("dockerfile content:")
-        for line in docker_file_content.splitlines():
-            LOG.debug(line.rstrip())
+        if DOCKERFILE_LOGGER.isEnabledFor(logging.DEBUG):
+            DOCKERFILE_LOGGER.debug("dockerfile content:")
+            for line in docker_file_content.splitlines():
+                DOCKERFILE_LOGGER.debug(line.rstrip())
 
         dockerfile_path = os.path.join(tmp_dir.path, "Dockerfile")
         open(dockerfile_path, "w").write(docker_file_content)
 
+        cmd = f'docker build -t {image_tag} -f Dockerfile .'
+
+        LOG.info(f"Executing '{cmd}' in directory '{tmp_dir.path}'")
         out, code = ProcessRunner(
-            f'docker build -t {image_tag} -f Dockerfile .',
+            cmd,
             cwd=tmp_dir.path
         ).communicate()
         if code != 0:

@@ -1,14 +1,67 @@
 #!/usr/bin/env python3
 import logging
+import typing
 
 import click
-import typing
 
 from ambari_docker.config import Configuration
 from ambari_docker.image_builder import build_ambari_agent_image, build_ambari_server_image
 
-
 LOG = logging.getLogger("AmbariDocker")
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "formatters": {
+        "subcommand": {
+            "format": '\033[0;34m===> %(message)s\033[0m'
+        },
+        "dockerfile": {
+            "format": '\033[0;32m%(message)s\033[0m'
+        },
+        "default": {
+            "format": '%(asctime)-15s [%(levelname)s] [%(name)s] %(message)s'
+        }
+    },
+
+    "handlers": {
+        "subcommand": {
+            "()": "ambari_docker.utils.StdOutHandler",
+            "formatter": "subcommand",
+            "level": "DEBUG"
+        },
+        "dockerfile": {
+            "()": "ambari_docker.utils.StdOutHandler",
+            "formatter": "dockerfile",
+            "level": "DEBUG"
+        },
+        "default": {
+            "()": "ambari_docker.utils.StdOutHandler",
+            "formatter": "default",
+            "level": "DEBUG"
+        }
+    },
+
+    "loggers": {
+        "AmbariDocker": {
+            "handlers": ["default"]
+        },
+        "DockerImageBuilder": {
+            "handlers": ["default"]
+        },
+        "ProcessRunner": {
+            "handlers": ["subcommand"],
+            "level": "DEBUG"
+        },
+        "DockerfileLogger": {
+            "handlers": ["dockerfile"],
+            "level": "DEBUG"
+        },
+        '': {
+            'level': 'DEBUG'
+        }
+    }
+
+}
 
 IMAGE_SHORT_HELP = "build ambari images"
 COMPOSE_SHORT_HELP = "create compose file"
@@ -37,10 +90,6 @@ IMAGE_MPACKS = {
     "default": [],
     "multiple": True,
     "help": "specify mpack to install, can be used multiple times"
-}
-
-IMAGE_VERBOSE = {
-    "count": True
 }
 
 COMPOSE_SUFFIX = {
@@ -114,7 +163,8 @@ class PipelineCommand(object):
 
 
 @click.group(chain=True)
-def cli():
+@click.option('--log-level', type=click.Choice(['INFO', 'DEBUG']), default="INFO", show_default=True)
+def cli(log_level):
     """
     Command line tool to deal with ambari and docker.
 
@@ -124,10 +174,17 @@ def cli():
     "image" command will be used in "compose" command(this means that '--server-image' and '--agent-image' options
     for "compose" command can be omitted).
     """
+    for name, handler in LOGGING_CONFIG["handlers"].items():
+        handler["level"] = log_level
+    for name, logger in LOGGING_CONFIG["loggers"].items():
+        logger["level"] = log_level
+
+    import logging.config
+    logging.config.dictConfig(LOGGING_CONFIG)
 
 
 @cli.resultcallback()
-def process_pipeline(processors):
+def process_pipeline(processors, log_level):
     with Configuration() as config:
         previous_command_context = {
             "j2_env": config.jinja_env
@@ -146,7 +203,6 @@ def process_pipeline(processors):
 @click.option('-sbi', '--server-base-image', **IMAGE_SERVER_BASE_IMAGE)
 @click.option('-abi', '--agent-base-image', **IMAGE_AGENT_BASE_IMAGE)
 @click.option('-m', '--mpack', **IMAGE_MPACKS)
-@click.option('-v', '--verbose', **IMAGE_VERBOSE)
 def image(**kwargs):
     """
     Command to build ambari server and agent docker images.
@@ -158,8 +214,7 @@ def image(**kwargs):
             include_agent: bool,
             server_base_image: str,
             agent_base_image: str,
-            mpack: typing.List[str],
-            verbose: int
+            mpack: typing.List[str]
     ):
         agent_image = build_ambari_agent_image(repository, agent_base_image, j2_env=context['j2_env'])
         server_base_image = agent_image if include_agent else server_base_image
@@ -232,7 +287,4 @@ def compose(**kwargs):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)-15s [%(levelname)s] [%(name)s] %(message)s')
-    logging.getLogger("requests").setLevel(logging.ERROR)
-    logging.getLogger("urllib3").setLevel(logging.ERROR)
     cli()
