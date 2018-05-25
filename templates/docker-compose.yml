@@ -1,9 +1,9 @@
-{% import 'macro.yml' as macro -%}
+{% from 'host.yml' import host with context -%}
 version: '2.4'
 services:
-  {{ macro.systemd(server_hostname, server_image, suffix, domain, server_hostname, memory)}}
+  {{ host(server_hostname, server_image) }}
   {%- for node in nodes %}
-  {{ macro.systemd(node, agent_image, suffix, domain, server_hostname, memory)}}
+  {{ host(node, agent_image) }}
   {%- endfor %}
 networks:
   cluster_net:

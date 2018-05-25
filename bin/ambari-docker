@@ -153,6 +153,13 @@ COMPOSE_OUTPUT = {
     "type": click.Path()
 }
 
+COMPOSE_LXCFS = {
+    "help": "include lxcfs volumes",
+    "show_default": True,
+    "is_flag": True,
+    "default": False
+}
+
 
 class PipelineCommand(object):
     def __init__(self, order, name, callback, **kwargs):
@@ -238,6 +245,7 @@ def image(**kwargs):
 @click.option('-nn', '--network-name', **COMPOSE_NETWORK_NAME)
 @click.option("-si", "--server-image", **COMPOSE_SERVER_IMAGE)
 @click.option("-ai", "--agent-image", **COMPOSE_AGENT_IMAGE)
+@click.option("--lxcfs", **COMPOSE_LXCFS)
 def compose(**kwargs):
     """
     Command to generate docker-compose file based on requested parameters.
@@ -255,7 +263,8 @@ def compose(**kwargs):
             server_name: str,
             network_name: str,
             server_image: str,
-            agent_image: str
+            agent_image: str,
+            lxcfs
     ):
         if isinstance(context, dict):
             if agent_image is None:
@@ -278,7 +287,8 @@ def compose(**kwargs):
             server_image=server_image,
             agent_image=agent_image,
             suffix=suffix,
-            memory=memory
+            memory=memory,
+            lxcfs=lxcfs
         )
         LOG.info(f"Writing compose file to '{output}'")
         open(output, "w").write(result)
