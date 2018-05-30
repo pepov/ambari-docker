@@ -2,12 +2,13 @@ import logging
 import os
 import urllib.parse
 from collections import defaultdict
-from typing import Union, List, Dict
+from typing import Union, List
 
 import docker
 import docker.errors
 import jinja2
 
+from ambari_docker.config import TEMPLATE_TOOL
 from ambari_docker.utils import TempDirectory, copy_tree, ProcessRunner, download_file, copy_file
 
 docker_client = docker.from_env()
@@ -193,7 +194,6 @@ def _build_ambari_image(
         env=None,
         packages=(),
         context_data=None,
-        j2_env: jinja2.Environment = None,
         image_prefix="crs",
         **template_arguments
 ):
@@ -250,20 +250,18 @@ def _build_ambari_image(
     template_arguments['base_image'] = base_image_name
     template_arguments['repo_file_url'] = repo_file_url
 
-    template = j2_env.get_template(
-        f"dockerfiles/ambari/{_os_to_template_path[repo_os]}/Dockerfile.{component}")
-    template_directory = os.path.dirname(os.path.abspath(template.filename))
-    context_data.append(ContextDirectory(template_directory))
+    template_path = f"templates/dockerfiles/ambari/{_os_to_template_path[repo_os]}/Dockerfile.{component}"
+    dockerfile_content = TEMPLATE_TOOL.render(template_path, **template_arguments)
+    with TempDirectory() as template_root:
+        TEMPLATE_TOOL.extract_template_root(template_path, template_root.path)
+        context_data.append(ContextDirectory(template_root.path))
+        resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
 
-    dockerfile_content = template.render(**template_arguments)
-
-    resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
-
-    build_docker_image(
-        image_tag=resulting_image_tag,
-        docker_file_content=dockerfile_content,
-        context_data=context_data
-    )
+        build_docker_image(
+            image_tag=resulting_image_tag,
+            docker_file_content=dockerfile_content,
+            context_data=context_data
+        )
 
     return resulting_image_tag
 
@@ -271,8 +269,7 @@ def _build_ambari_image(
 def build_ambari_server_image(
         ambari_repo_url: str,
         base_image_name: str = None,
-        mpacks=None,
-        j2_env: jinja2.Environment = None
+        mpacks=None
 ):
     if mpacks is None:
         mpacks = []
@@ -299,22 +296,17 @@ def build_ambari_server_image(
         "server",
         packages=packages,
         context_data=context_data,
-        j2_env=j2_env,
         **template_arguments
     )
 
 
 def build_ambari_agent_image(
         ambari_repo_url: str,
-        base_image_name: str = None,
-        j2_env: jinja2.Environment = None,
-        verbosity=0
+        base_image_name: str = None
 ):
     return _build_ambari_image(
         ambari_repo_url,
         base_image_name,
         "agent",
-        packages=("ambari-agent",),
-        j2_env=j2_env,
-        verbosity=verbosity
+        packages=("ambari-agent",)
     )

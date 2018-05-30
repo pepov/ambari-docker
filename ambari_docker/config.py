@@ -1,59 +1,52 @@
-import logging
-import os
-import shutil
-import tempfile
-import zipfile
+import posixpath
+import tarfile
 
+import jinja2
 import pkg_resources
-from jinja2 import Environment, FileSystemLoader
+
+ROOT_PACKAGE = "ambari_docker"
+RES_FILE_ARCHIVE = "data.tar"
 
 
-class RelEnvironment(Environment):
-    """Override join_path() to enable relative template paths."""
+class DataFilesTemplateLoader(jinja2.BaseLoader):
+    def get_source(self, environment, template):
+        res_file = tarfile.TarFile(fileobj=pkg_resources.resource_stream(ROOT_PACKAGE, RES_FILE_ARCHIVE))
+        res_member = res_file.getmember(template)  # type: tarfile.TarInfo
+        if res_member and res_member.isfile():
+            return res_file.extractfile(res_member).read().decode(), template, lambda: True
+        raise jinja2.TemplateNotFound(template)
 
+
+class DataFilesEnvironment(jinja2.Environment):
     def join_path(self, template, parent):
-        return os.path.join(os.path.dirname(parent), template)
+        return posixpath.normpath(posixpath.join(posixpath.dirname(parent), template))
 
 
-class Configuration(object):
-    LOG = logging.getLogger("Configuration")
-
+class TemplateTool(object):
     def __init__(self):
-        self.data_directory = None
-        self.jinja_env = None
-        self.image_prefix = 'crs'
-        self.log_dockerfile = False
-        self.log_docker_cmd_output = False
-
-    def prepare(self):
-        global _config_instance
-        self.data_directory = tempfile.mkdtemp()
-        stream = pkg_resources.resource_stream("ambari_docker", 'data.zip')
-        zip_ref = zipfile.ZipFile(stream, 'r')
-        zip_ref.extractall(self.data_directory)
-        zip_ref.close()
-        stream.close()
-
-        self.jinja_env = RelEnvironment(
-            loader=FileSystemLoader(os.path.join(self.data_directory, 'templates'))
+        self.env = DataFilesEnvironment(
+            loader=DataFilesTemplateLoader()
         )
-        _config_instance = self
-        self.LOG.info(f"Extracted data files to {self.data_directory}")
 
-    def cleanup(self):
-        try:
-            shutil.rmtree(self.data_directory, ignore_errors=True)
-        except:
-            pass
-        self.LOG.info(f"Cleared data files directory {self.data_directory}")
-        self.data_directory = None
-        self.jinja_env = None
-        global _config_instance
-        _config_instance = None
+    def render(self, template_path, **template_arguments):
+        return self.env.get_template(template_path).render(**template_arguments)
 
-    def __enter__(self):
-        self.prepare()
-        return self
+    @staticmethod
+    def extract_template_root(template_path, destination):
+        template_root = posixpath.dirname(template_path)
+        if not template_root.endswith('/'):
+            template_root += '/'
+        offset = len(template_root)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.cleanup()
+        res_file = tarfile.TarFile(fileobj=pkg_resources.resource_stream(ROOT_PACKAGE, RES_FILE_ARCHIVE))
+
+        def get_components():
+            for info in res_file.getmembers():
+                if info.name.startswith(template_root):
+                    info.name = info.name[offset:]
+                    yield info
+
+        res_file.extractall(destination, members=get_components())
+
+
+TEMPLATE_TOOL = TemplateTool()

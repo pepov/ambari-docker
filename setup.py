@@ -2,18 +2,34 @@
 
 from setuptools import setup, find_packages
 import os
-import zipfile
+import tarfile
+
+ROOT_PACKAGE = "ambari_docker"
+RES_FILE_ARCHIVE = "data.tar"
+SETUP_PY_ROOT = os.path.dirname(__file__)
 
 
-def zip_dir(path, destination):
-    zipf = zipfile.ZipFile(destination, 'w', zipfile.ZIP_STORED)
-    for root, dirs, files in os.walk(path):
-        for file in files:
-            zipf.write(os.path.join(root, file))
-    zipf.close()
+def dir_to_tar(path, destination):
+    prefix = os.path.dirname(path)
+    if not prefix.endswith('/'):
+        prefix += '/'
+    if prefix.startswith('/'):
+        prefix = prefix[1:]
+    offset = len(prefix)
+
+    def reset(info: tarfile.TarInfo):
+        info.uid = info.gid = 0
+        info.uname = info.gname = "root"
+        if info.name.startswith(prefix):
+            info.name = info.name[offset:]
+        return info
+
+    tar = tarfile.TarFile(destination, 'w')
+    tar.add(path, recursive=True, filter=reset)
+    tar.close()
 
 
-zip_dir(os.path.join(os.path.dirname(__file__), 'templates'), "ambari_docker/data.zip")
+dir_to_tar(os.path.join(SETUP_PY_ROOT, 'templates'), os.path.join(ROOT_PACKAGE, RES_FILE_ARCHIVE))
 
 setup(
     name='ambari-docker-utils',
@@ -23,7 +39,7 @@ setup(
     author_email='echekanskiy@gmail.com',
     packages=find_packages(),
     zip_safe=False,
-    package_data={"ambari_docker": ["data.zip"]},
+    package_data={ROOT_PACKAGE: [RES_FILE_ARCHIVE]},
     install_requires=['docker', 'jinja2', 'click', 'requests'],
     scripts=['bin/ambari-docker'],
 )

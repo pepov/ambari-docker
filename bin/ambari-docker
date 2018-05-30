@@ -4,7 +4,7 @@ import typing
 
 import click
 
-from ambari_docker.config import Configuration
+from ambari_docker.config import TEMPLATE_TOOL
 from ambari_docker.image_builder import build_ambari_agent_image, build_ambari_server_image
 
 LOG = logging.getLogger("AmbariDocker")
@@ -192,16 +192,11 @@ def cli(log_level):
 
 @cli.resultcallback()
 def process_pipeline(processors, log_level):
-    with Configuration() as config:
-        previous_command_context = {
-            "j2_env": config.jinja_env
-        }
-        for pipeline_command in sorted(processors, key=lambda x: x.order):
-            previous_command_context = pipeline_command.callback(context=previous_command_context,
-                                                                 **pipeline_command.args)
-            if not previous_command_context:
-                previous_command_context = {}
-            previous_command_context['j2_env'] = config.jinja_env
+    previous_command_context = {}
+    for pipeline_command in sorted(processors, key=lambda x: x.order):
+        previous_command_context = pipeline_command.callback(context=previous_command_context, **pipeline_command.args)
+        if not previous_command_context:
+            previous_command_context = {}
 
 
 @cli.command(short_help=IMAGE_SHORT_HELP)
@@ -223,9 +218,9 @@ def image(**kwargs):
             agent_base_image: str,
             mpack: typing.List[str]
     ):
-        agent_image = build_ambari_agent_image(repository, agent_base_image, j2_env=context['j2_env'])
+        agent_image = build_ambari_agent_image(repository, agent_base_image)
         server_base_image = agent_image if include_agent else server_base_image
-        server_image = build_ambari_server_image(repository, server_base_image, mpacks=mpack, j2_env=context['j2_env'])
+        server_image = build_ambari_server_image(repository, server_base_image, mpacks=mpack)
 
         LOG.info(f"Resulting agent image :{agent_image}")
         LOG.info(f"Resulting server image:{server_image}")
@@ -276,11 +271,12 @@ def compose(**kwargs):
         if agent_image is None or server_image is None:
             click.get_current_context().fail("'--server-image' and '--agent-image' must be specified")
 
-        compose_template = context['j2_env'].get_template("docker-compose.yml")
         nodes = []
         for i in range(int(node_count)):
             nodes.append(node_template.format(number=i))
-        result = compose_template.render(
+
+        result = TEMPLATE_TOOL.render(
+            "templates/docker-compose.yml",
             server_hostname=server_name,
             domain=network_name,
             nodes=nodes,
@@ -288,8 +284,8 @@ def compose(**kwargs):
             agent_image=agent_image,
             suffix=suffix,
             memory=memory,
-            lxcfs=lxcfs
-        )
+            lxcfs=lxcfs)
+
         LOG.info(f"Writing compose file to '{output}'")
         open(output, "w").write(result)
 
