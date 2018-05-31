@@ -251,17 +251,17 @@ def _build_ambari_image(
     template_arguments['repo_file_url'] = repo_file_url
 
     template_path = f"templates/dockerfiles/ambari/{_os_to_template_path[repo_os]}/Dockerfile.{component}"
+    template_root = TEMPLATE_TOOL.get_template_root(template_path)
     dockerfile_content = TEMPLATE_TOOL.render(template_path, **template_arguments)
-    with TempDirectory() as template_root:
-        TEMPLATE_TOOL.extract_template_root(template_path, template_root.path)
-        context_data.append(ContextDirectory(template_root.path))
-        resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
 
-        build_docker_image(
-            image_tag=resulting_image_tag,
-            docker_file_content=dockerfile_content,
-            context_data=context_data
-        )
+    context_data.append(ContextDirectory(template_root))
+    resulting_image_tag = f"{image_prefix}/ambari/{component}:{repo_build}"
+
+    build_docker_image(
+        image_tag=resulting_image_tag,
+        docker_file_content=dockerfile_content,
+        context_data=context_data
+    )
 
     return resulting_image_tag
 
