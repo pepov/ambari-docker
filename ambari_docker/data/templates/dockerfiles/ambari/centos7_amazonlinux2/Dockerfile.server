@@ -7,8 +7,8 @@ RUN chmod +x /usr/bin/systemctl /usr/bin/start-ambari-server
 RUN ambari-server setup -s
 {%- if mpacks is defined %}
 COPY mpacks/ /root/mpacks
-{%- for mpack in mpacks %}
-RUN ambari-server install-mpack --mpack {{ mpack }}
+{%- for mpack_cmd in mpacks %}
+RUN {{ mpack_cmd }}
 {%- endfor %}
 {%- endif %}
 RUN systemctl start postgresql; su postgres -c "psql -c \"CREATE USER admin WITH PASSWORD 'admin'; ALTER USER admin WITH SUPERUSER;\"" && echo -e "local all all md5\nhost all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf

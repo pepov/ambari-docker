@@ -11,6 +11,8 @@ import jinja2
 from ambari_docker.config import TEMPLATE_TOOL
 from ambari_docker.utils import TempDirectory, copy_tree, ProcessRunner, download_file, copy_file
 
+PURGE_PREFIX = "purge+"
+
 docker_client = docker.from_env()
 
 _os_to_image = {
@@ -280,11 +282,23 @@ def build_ambari_server_image(
     mpacks_in_container = []
 
     for mpack in mpacks:
+        if mpack.startswith(PURGE_PREFIX):
+            purge = True
+            mpack = mpack[len(PURGE_PREFIX):]
+        else:
+            purge = False
+
         mpack_name = os.path.basename(mpack)
         mpack_path = f"/mpacks/{mpack_name}"
         context_data.append(ContextFile(mpack, mpack_path))
-        mpacks_in_container.append(f"/root/mpacks/{mpack_name}")
-
+        if purge:
+            mpacks_in_container.append(
+                f"systemctl start postgresql; echo yes | ambari-server install-mpack --mpack /root/mpacks/{mpack_name} --purge"
+            )
+        else:
+            mpacks_in_container.append(
+                f"systemctl start postgresql; ambari-server install-mpack --mpack /root/mpacks/{mpack_name}"
+            )
     if mpacks_in_container:
         template_arguments["mpacks"] = mpacks_in_container
 

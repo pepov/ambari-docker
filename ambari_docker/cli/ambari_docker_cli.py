@@ -89,7 +89,8 @@ IMAGE_AGENT_BASE_IMAGE = {
 IMAGE_MPACKS = {
     "default": [],
     "multiple": True,
-    "help": "specify mpack to install, can be used multiple times"
+    "help": "specify mpack to install, can be used multiple times, prepend path with 'purge+' to install mpack with"
+            " purge option"
 }
 
 COMPOSE_SUFFIX = {
