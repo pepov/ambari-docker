@@ -22,7 +22,7 @@ setup(
     zip_safe=False,
     entry_points={
         'console_scripts': [
-            'ambari-docker = ambari_docker.cli.ambari_docker:cli'
+            'ambari-docker = ambari_docker.cli.ambari_docker_cli:cli'
         ]
     }
 )
