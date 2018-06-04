@@ -6,7 +6,7 @@ from typing import Union, List
 
 import docker
 import docker.errors
-import jinja2
+import requests
 
 from ambari_docker.config import TEMPLATE_TOOL
 from ambari_docker.utils import TempDirectory, copy_tree, ProcessRunner, download_file, copy_file
@@ -229,8 +229,24 @@ def _build_ambari_image(
     path_parts = url.path.split('/')
 
     repo_os, repo_stack, repo_build = path_parts[-4], path_parts[-5], path_parts[-1]
-    repo_file_url = f"{ambari_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo"
 
+    possible_urls = [
+        f"{ambari_repo_url.rstrip('/')}/{repo_stack.lower()}bn.repo",
+        f"{ambari_repo_url.rstrip('/')}/{repo_stack.lower()}.repo"
+    ]
+
+    repo_file_url = None
+    for url in possible_urls:
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                repo_file_url = url
+                break
+        except requests.RequestException:
+            pass
+
+    if repo_file_url is None:
+        raise Exception("Failed to determine repo file url")
     # create labels
     labels['ambari.repo'] = ambari_repo_url
     labels['ambari.build'] = repo_build
