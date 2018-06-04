@@ -161,6 +161,13 @@ COMPOSE_LXCFS = {
     "default": False
 }
 
+COMPOSE_SERVER_PORT = {
+    "default": [],
+    "multiple": True,
+    "help": "specify port to expose from server container, see docker-compose help for formatting. Option can be "
+            "specified several times"
+}
+
 
 class PipelineCommand(object):
     def __init__(self, order, name, callback, **kwargs):
@@ -241,6 +248,7 @@ def image(**kwargs):
 @click.option('-nn', '--network-name', **COMPOSE_NETWORK_NAME)
 @click.option("-si", "--server-image", **COMPOSE_SERVER_IMAGE)
 @click.option("-ai", "--agent-image", **COMPOSE_AGENT_IMAGE)
+@click.option("-sp", "--server-port", "server_ports", **COMPOSE_SERVER_PORT)
 @click.option("--lxcfs", **COMPOSE_LXCFS)
 def compose(**kwargs):
     """
@@ -260,7 +268,8 @@ def compose(**kwargs):
             network_name: str,
             server_image: str,
             agent_image: str,
-            lxcfs
+            server_ports: typing.List[str],
+            lxcfs: bool
     ):
         if isinstance(context, dict):
             if agent_image is None:
@@ -285,7 +294,9 @@ def compose(**kwargs):
             agent_image=agent_image,
             suffix=suffix,
             memory=memory,
-            lxcfs=lxcfs)
+            lxcfs=lxcfs,
+            server_ports=server_ports
+        )
 
         LOG.info(f"Writing compose file to '{output}'")
         open(output, "w").write(result)

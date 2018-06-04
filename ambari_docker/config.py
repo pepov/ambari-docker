@@ -1,5 +1,5 @@
 import jinja2
-from os import path
+import posixpath as path
 from ambari_docker.data import DATA_ROOT
 
 

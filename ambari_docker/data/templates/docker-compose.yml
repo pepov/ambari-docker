@@ -1,7 +1,7 @@
 {% from 'host.yml' import host with context -%}
 version: '2.4'
 services:
-  {{ host(server_hostname, server_image) }}
+  {{ host(server_hostname, server_image, server_ports) }}
   {%- for node in nodes %}
   {{ host(node, agent_image) }}
   {%- endfor %}

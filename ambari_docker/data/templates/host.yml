@@ -1,8 +1,14 @@
-{%- macro host(name, image) %}
+{%- macro host(name, image, ports=[]) %}
   {{- name }}:
     image: "{{ image }}"
     container_name: "{{ name }}.{{ suffix }}"
     hostname: "{{ name }}.{{ suffix }}.{{ domain }}"
+{%- if ports %}
+    ports:
+{%- for port in ports %}
+     - "{{ port }}"
+{%- endfor %}
+{%- endif %}
     networks:
      - cluster_net
     environment:
