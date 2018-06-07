@@ -17,6 +17,7 @@
      - SYS_ADMIN
      - SYS_RESOURCE
     mem_limit: {{ memory }}
+    cpus: {{ cpus }}
 {%- if lxcfs is defined and lxcfs %}
     volumes:
       - /var/lib/lxcfs/proc/meminfo:/proc/meminfo

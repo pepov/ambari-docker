@@ -112,6 +112,13 @@ COMPOSE_MEMORY = {
     "type": click.STRING
 }
 
+COMPOSE_CPUS = {
+    "help": "node cpu limit",
+    "show_default": True,
+    "default": "0.5",
+    "type": click.STRING
+}
+
 COMPOSE_NODE_TEMPLATE = {
     "help": "node name template, currently accept 'number' argument(node number)",
     "show_default": True,
@@ -243,6 +250,7 @@ def image(**kwargs):
 @click.option('-s', '--suffix', **COMPOSE_SUFFIX)
 @click.option('-n', '--node-count', **COMPOSE_NODE_COUNT)
 @click.option('-m', '--memory', **COMPOSE_MEMORY)
+@click.option('-c', '--cpus', **COMPOSE_CPUS)
 @click.option('-nt', '--node-template', **COMPOSE_NODE_TEMPLATE)
 @click.option('-sn', '--server-name', **COMPOSE_SERVER_NAME)
 @click.option('-nn', '--network-name', **COMPOSE_NETWORK_NAME)
@@ -263,6 +271,7 @@ def compose(**kwargs):
             suffix: str,
             node_count: int,
             memory: str,
+            cpus: float,
             node_template: str,
             server_name: str,
             network_name: str,
@@ -294,6 +303,7 @@ def compose(**kwargs):
             agent_image=agent_image,
             suffix=suffix,
             memory=memory,
+            cpus=cpus,
             lxcfs=lxcfs,
             server_ports=server_ports
         )
